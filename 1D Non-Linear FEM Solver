@@ -1,0 +1,399 @@
+
+clear;clc;
+
+% =========================================================================
+%                  U S E R   I N P U T   S E C T I ON
+% =========================================================================
+
+% INPUT FILE PATH
+INP_FILE = 'A:\01. Academics\02. Semester 2\MEEN 673\01. Programming resources\FEM1D_MATLAB\FEM1D_MATLAB\INP_FILE.yaml';
+
+
+% =========================================================================
+%                           P R O C E S S O R
+% =========================================================================
+
+% I N P U T   F I L E   R E A D E R
+% .........................................................................
+
+% ADD YAML READER FUNCTIONS TO THE PATH
+addpath(genpath('YAML_MATLAB_0.4.3'));
+
+% READ THE INPUT FILE AND EXTRACT REQUIRED VARIABLES
+INP_YAML = ReadYaml(INP_FILE);
+
+X0 = INP_YAML.X0; % X COORDINATE OF THE LEFT END OF THE DOMAIN
+L  = INP_YAML.L;  % LENGTH OF THE DOMAIN
+
+% PDE COEFFICIENTS...
+A  = INP_YAML.A;
+B  = INP_YAML.B;
+C  = INP_YAML.C;
+F  = INP_YAML.F;
+[DATA.AX0, DATA.AX1, DATA.AU1, DATA.AU2, ...
+ DATA.AUX1, DATA.AUX2] = deal(A{:});
+[DATA.BX0, DATA.BX1, DATA.BU1, DATA.BU2, ...
+ DATA.BUX1, DATA.BUX2] = deal(B{:});
+[DATA.CX0, DATA.CX1, DATA.CU1, DATA.CU2, ...
+ DATA.CUX1, DATA.CUX2] = deal(C{:});
+[DATA.FX0, DATA.FX1, DATA.FX2 ] = deal(F{:});
+
+P    = INP_YAML.P;    % ELEMENT ORDER
+NEM  = INP_YAML.NEM;  % NUMBER OF ELEMENTS IN THE MESH
+NGP  = INP_YAML.NGP;  % NUMBER OF GAUSS POINTS
+NSPV = INP_YAML.NSPV; % NUMBER OF DIRICHLET BOUNDARY CONDITIONS
+NSSV = INP_YAML.NSSV; % NUMBER OF NEUMANN BOUNDARY CONDITIONS
+NSMB = INP_YAML.NSMB; % NUMBER OF ROBIN BOUNDARY CONDITIONS
+
+% NODES AND DEGREES OF FREEDOM WHERE THE 
+% PRIMARY VARIABLE IS PRESCRIBED...
+ISPV(:,1) = cell2mat(INP_YAML.ISPV.NODES);
+ISPV(:,2) = cell2mat(INP_YAML.ISPV.DOFS);
+VSPV      = cell2mat(INP_YAML.VSPV);
+
+% NODES AND DEGREES OF FREEDOM WHERE THE 
+% SECONDARY VARIABLE IS PRESCRIBED...
+if(NSSV>0)
+    ISSV(:,1) = cell2mat(INP_YAML.ISSV.NODES);
+    ISSV(:,2) = cell2mat(INP_YAML.ISSV.DOFS);
+    VSSV      = cell2mat(INP_YAML.VSSV);
+end
+
+% NODES AND DOFS WITH PRESCRIBED 
+% ROBIN (MIXED) BOUNDARY CONDITIONS...
+if(NSMB>0)
+    ISMB(:,1) = cell2mat(INP_YAML.ISMB.NODES);
+    ISMB(:,2) = cell2mat(INP_YAML.ISMB.DOFS);
+    UREF      = cell2mat(INP_YAML.UREF);
+    BETA0     = cell2mat(INP_YAML.BETA0);
+    BETAU     = cell2mat(INP_YAML.BETU);
+end
+
+% NONLINEAR ANALYSIS PARAMETERS
+NONLIN  = INP_YAML.NONLIN;  % SOLVER MODE (0-LINEAR; 1-PICARD; 2-NEWTON)
+ITERMAX = INP_YAML.ITERMAX; % MAXIMUM NO. OF ITERATIONS BEFORE TERMINATION
+EPSILON = INP_YAML.EPSILON; % CONVERGENCE TOLERANCE
+GAMMA   = INP_YAML.GAMMA;   % RELAXATION PARAMETER
+
+
+% M E S H   G E N E R A T I O N
+% .........................................................................
+
+% CALL THE 1D MESHING FUNCTION
+[GLX,NOD,NNM,NPE] = MESH1D(X0,L,NEM,P);
+
+% REMARKS:
+% GLX - ARRAY OF NODE COORDINATES
+% NOD - ELEMENT CONNECTIVITY MATRIX
+% NNM - TOTAL NUMBER OF NODES IN THE MESH
+% NPE - NUMBER OF NODES PER ELEMENT
+
+% PRECOMPUTATION OF SHAPE FUNCTIONS AND THEIR 
+% DERIVATIVES AT INTEGRATION POINTS
+GFILE = "GAUSS.g"; % DATABASE OF GAUSS QUADRATURE DATA
+[SFL_ARRAY, DSFL_ARRAY, GAUSWT] = PRECOMPUTE_SF(P,GFILE,NGP);
+
+
+% F I N I T E   E L E M E N T   S O L V E R
+% .........................................................................
+
+
+NDF = 1;       % NUMBER OF DEGREES OF FREEDOM PER NODE
+NEQ = NNM*NDF; % NUMBER OF EQUATIONS IN THE GLOBAL SYSTEM
+NET = NPE*NDF; % NUMBER OF ELEMENT LEVEL EQUATIONS
+
+
+
+GCU = zeros(NEQ,1);   % GLOBAL SOLUTION ARRAY (CURRENT ITERATION)
+GPU = zeros(NEQ,1);   % GLOBAL SOLUTION ARRAY (PREVIOUS ITERATION)
+ITER = 0; % ITERATION COUNTER
+
+% NONLINEAR SOLUTION ITERATION LOOP
+while ITER<=ITERMAX
+    
+    % INCREMENT ITERATION COUNTER
+    ITER = ITER + 1;
+    disp(ITER)
+    % INITIALIZE THE GLOBAL COEFFICIENT MATRICES AND SOLUTION ARRAY
+    GLK = zeros(NEQ,NEQ); % GLOBAL 'STIFFNESS' MATRIX
+    GLF = zeros(NEQ,1);   % GLOBAL 'FORCE' VECTOR
+
+    % LOOP OVER ELEMENTS
+    for N=1:NEM
+        NODES = NOD(N,:);   % NODES OF CURRENT ELEMENT
+        ELX   = GLX(NODES); % NODAL COORDINATES OF CURRENT ELEMENT
+    
+        % CONSTRUCT GLOBAL-TO-LOCAL DOF MAP
+        INDXS = zeros(1,NET);
+        S = 1;
+        for ND = 1:NDF
+            INDXS(S:NDF:end) = NDF*NODES - (NDF - S)*ones(1,NPE); 
+            S = S + 1;
+        end
+
+        % ELEMENT SOLUTION ARRAY AFTER APPLYING RELAXATION
+        ELU = (1-GAMMA)*GPU(INDXS) + GAMMA*GCU(INDXS);
+
+        % CALL ELEMENT-LEVEL ROUTINE TO COMPUTE 
+        % THE ELEMENT COEFFICIENT ARRAYS
+        [ELK,ELF] = ELEMAT1D(DATA,SFL_ARRAY,DSFL_ARRAY,GAUSWT,NONLIN,...
+                             ELX,ELU);
+
+        % ASSEMBLE ELEMENT-LEVEL EQUATIONS INTO THE GLOBAL SYSTEM
+        GLK(INDXS,INDXS) = GLK(INDXS,INDXS)+ELK;
+        GLF(INDXS) = GLF(INDXS)+ELF;
+    end
+
+    % MODIFY GLOBAL MATRICES (GLK, GLF) TO 
+    % ENFORCE DIRICHLET BOUNDARY CONDITIONS
+    if(NSPV>0)
+        for NP=1:NSPV
+            NB = (ISPV(NP,1)-1)*NDF+ISPV(NP,2);
+            for J=1:NEQ
+                GLK(NB,J)  = 0;
+                GLK(NB,NB) = 1;
+                if(NONLIN>1)
+                    GLF(NB) = VSPV(NP)-GCU(NB);
+                else
+                    GLF(NB)    = VSPV(NP);
+                end
+            end
+        end
+    end
+    
+    % MODIFY THE FORCE VECTOR TO INCLUDE SPECIFIED NONZERO 
+    % SECONDARY VARIABLES IN THE FULL MATRIX SYSTEM
+    if(NSSV>0)
+        for NS=1:NSSV
+            NB = (ISSV(NS,1)-1)*NDF+ISSV(NS,2);
+            GLF(NB) = GLF(NB) + VSSV(NS);
+        end
+    end
+
+    % IMPLEMENT THE SPECIFIED ROBIN BOUNDARY CONDITIONS
+    if(NSMB>0)
+        for MB=1:NSMB
+            NB = (ISMB(MB,1)-1)*NDF+ISMB(MB,2);
+            if(NONLIN<=1)
+                GLK(NB,NB)=GLK(NB,NB)+BETA0(MB)+BETAU(MB)*GLU(NB);
+                GLF(NB)=GLF(NB)+UREF(MB)*(BETA0(MB)+BETAU(MB)*GLU(NB));
+            else
+                GLK(NB,NB)= GLK(NB,NB)+BETA0(MB)+2.0*BETAU(MB)*GLU(NB)...
+     	                                  -UREF(MB)*BETAU(MB);
+                GLF(NB)= GLF(NB)+UREF(MB)*(BETA0(MB) ...
+                            +BETAU(MB)*GLU(NB))-(BETA0(MB) ...
+                            +BETAU(MB)*GLU(NB))*GLU(NB);
+            end
+        end
+    end
+
+    % SOLVE SYSTEM OF SIMULTANEOUS LINEAR EQUATIONS. 
+    SOLU = GLK\GLF;
+
+    if NONLIN==1
+        GPU = GCU;
+        GCU = SOLU;
+        DU = GCU - GPU;
+        ERR = DU/GCU;
+        if ERR<EPSILON
+            break;
+        end
+    elseif NONLIN>1
+        GPU = GCU;
+        GCU = GCU + SOLU;
+        if norm(SOLU) < EPSILON
+            break;
+        end
+    end
+   
+    disp(GCU);
+end
+% END OF THE NONLINEAR SOLUTION ITERATION LOOP
+
+
+function [ELK,ELF] = ELEMAT1D(DATA,SFL_ARRAY,DSFL_ARRAY,GAUSWT,NONLIN,...
+                              ELX,ELU)
+    
+    NDF = 1;           % DEGREES OF FREEDOM PER NODE
+    NPE = size(ELX,2); % NODES PER ELEMENT
+    NET = NPE*NDF;     % NUMBER OF ELEMENT LEVEL EQUATIONS
+    
+    % EXTRACT PDE COEFFICIENTS FROM THE DATA STRUCT
+    [AX0, AX1, AU1, AU2, AUX1, AUX2] = ...
+        deal(DATA.AX0, DATA.AX1, DATA.AU1, ...
+             DATA.AU2, DATA.AUX1, DATA.AUX2);
+    [BX0, BX1, BU1, BU2, BUX1, BUX2] = ...
+        deal(DATA.BX0, DATA.BX1, DATA.BU1, ...
+             DATA.BU2, DATA.BUX1, DATA.BUX2);
+    [CX0, CX1, CU1, CU2, CUX1, CUX2] = ...
+        deal(DATA.CX0, DATA.CX1, DATA.CU1, ...
+             DATA.CU2, DATA.CUX1, DATA.CUX2);
+    [FX0, FX1, FX2 ] = ...
+        deal(DATA.FX0, DATA.FX1, DATA.FX2);
+    
+    % INITIALIZE ELEMENT COEFFICIENTS
+    ELK = zeros(NET,NET);
+    ELF = zeros(NET,1);
+    if(NONLIN>1)
+        % PART OF THE ELEMENT-LEVEL TANGENT MATRIX THAT ADDS TO ELK
+        TAN = zeros(NPE,NPE);
+    end
+    
+    % JACOBIAN
+    J = 0.5*(ELX(end)-ELX(1));
+
+    % NUMBER OF GAUSS POINTS
+    NGP = size(GAUSWT,1);
+
+    % INTEGRATION LOOP
+    for NG = 1:NGP
+        
+        % SHAPE FUNCTION DATA AT CURRENT GAUSS POINT
+        SFL   = SFL_ARRAY(:,NG);  % SHAPE FUNCTIONS
+        DSFL  = DSFL_ARRAY(:,NG); % SHAPE FUNCTION DERIVATIVES (LOCAL)
+        GDSFL = DSFL/J;           % SHAPE FUNCTION DERIVATIVES (GLOBAL)
+        CNST  = J*GAUSWT(NG);
+        
+        % GLOBAL COORDINATE OF THE CURRENT GAUSS POINT
+        X = dot(ELX,SFL);
+
+        if(NONLIN>0)
+            % APPROXIMATE THE SOLUTION VARIABLE 'U' AND ITS 
+            % DERIVATIVE 'DUX' AT THE CURRENT GAUSS POINT USING THE 
+            % PREVIOUS ITERATION SOLUTION
+            U   = dot(ELU,SFL);   % 'u'
+            DUX = dot(ELU,GDSFL); % 'du/dx'
+        end
+        
+        A = AX0 + AX1*X + AU1*U + AU2*U^2 +  AUX1*DUX + AUX2*DUX^2;
+        B = BX0 + BX1*X + BU1*U + BU2*U^2 +  BUX1*DUX + BUX2*DUX^2;
+        C = CX0 + CX1*X + CU1*U + CU2*U^2 +  CUX1*DUX + CUX2*DUX^2;
+        F = FX0 + FX1*X + FX2*X^2;
+
+        % COMPUTE ELEMENT STIFFNESS MATRIX AND FORCE VECTOR
+        for I=1:NPE
+            ELF(I) = ELF(I) + F*SFL(I)*CNST;
+            for J=1:NPE
+                ELK(I,J) = ELK(I,J) + ...
+                    (A*GDSFL(I)*GDSFL(J) + ...
+                     B*SFL(I)*GDSFL(J) +...
+                     C*SFL(I)*SFL(J))*CNST;
+            end
+        end
+
+        if(NONLIN>1)
+
+            for I = 1:NPE
+                for J = 1:NPE
+                    TAN = TAN + AU1*GDSFL(I)*SFL(J)*DUX*CNST;
+                end
+            end
+
+            disp('TAN MATRIX FOR ELEMENTS');
+            disp(TAN)
+        end
+    end
+
+    % FOR NEWTON'S METHOD
+    if(NONLIN>1)
+        % ELEMENT-LEVEL RESIDUAL
+        ELF = ELF - ELK*ELU;
+        % ELEMENT-LEVEL TANGENT MATRIX
+        ELK = ELK + TAN;
+    end
+end
+
+% =========================================================================
+% !!! 
+% YOU DO NOT NEED TO ALTER THE FUNCTIONS BELOW. THEY ARE COMPLETE
+% AND FUNCTIONAL AS THEY ARE 
+% !!!
+% =========================================================================
+
+function [GLX,NOD,NNM,NPE] = MESH1D(X0,L,NEM,P)
+    NPE = P + 1; % NODES PER ELEMENT
+    NNM = NEM*NPE - (NEM-1); % NUMBER OF NODES IN THE MESH
+    GLX = linspace(X0,X0+L,NNM); % NODE COORDINATES
+    % GENERATE ELEMENT CONNECTIVITY MATRIX
+    NOD=zeros(NEM,NPE);
+    K = 1;
+    for I=1:NEM
+        NOD(I,:) = linspace(K,K+P,NPE);
+        K = K+P;
+    end
+end
+
+function [SFL_ARRAY,DSFL_ARRAY,GAUSWT] = PRECOMPUTE_SF(P,GFILE,NGP)
+    NPE = P + 1; % NUMBER OF NODES PER ELEMENT
+    XIS = linspace(-1,1,NPE); % EVENLY-SPACED NODES
+    [GAUSPT,GAUSWT] = GAUSS(GFILE,NGP); % GAUSS WEIGHTS AND POINTS
+    % INTIALIZE...
+    SFL_ARRAY  = zeros(NPE,NGP);
+    DSFL_ARRAY = zeros(NPE,NGP);
+    for NG = 1:NGP
+        XI = GAUSPT(NG);
+        [SFL,DSFL] = SHAPE1D(XI,P,XIS);
+        SFL_ARRAY(:,NG) = SFL;
+        DSFL_ARRAY(:,NG) = DSFL;
+    end
+end
+
+function [GAUSPT,GAUSWT] = GAUSS(GFILE,NGP)
+    FILEID  = fopen(GFILE);
+    TLINE   = fgetl(FILEID);
+    TLINES  = cell(50,1);
+    K = 1;
+    while ischar(TLINE)
+        TLINES{K,1} = TLINE; TLINE = fgetl(FILEID); K = K + 1;
+    end
+    fclose(FILEID);
+    LINE = TLINES{2};
+    CONT = textscan(LINE,'%f','Delimiter',',');
+    SF_S = CONT{1};
+    SF   = SF_S(NGP);
+    GAUSPT = zeros(NGP,1);
+    GAUSWT = zeros(NGP,1);
+    for NI = 1:NGP
+        LINE = TLINES{SF};
+        CONT = textscan(LINE,'%f %f %f');
+        GAUSWT(NI) = CONT{2};
+        GAUSPT(NI) = CONT{3};
+        SF = SF + 1;
+    end
+end
+
+function [SFL,DSFL] = SHAPE1D(XI,P,XIS)
+    % INITIALIZE...
+    SFL  = zeros(P+1,1);
+    DSFL = zeros(P+1,1);
+    for I = 1:P+1
+        % DEFINE DUAL VARIABLE AND SET SEED
+        DualXI  = struct('V',XI,'D',1);
+        DualPSI = struct('V',1,'D',0);
+        for K = 1:P+1
+            if(I==K)
+                continue
+            end
+            DualTEMP1 = dualPlus(DualXI,struct('V',-XIS(K),'D',0));
+            DualTEMP2 = struct('V',XIS(I)-XIS(K),'D',0);
+            DualTEMP3 = dualBy(DualTEMP1,DualTEMP2);
+            DualPSI   = dualTimes(DualPSI,DualTEMP3);
+            SFL(I)    = DualPSI.V;
+            DSFL(I)   = DualPSI.D;
+        end
+    end
+end
+
+% FUNCTIONS FOR AUTOMATIC DIFFERENTIATION
+function O = dualPlus(A,B)
+    O.V = A.V + B.V;
+    O.D = A.D + B.D;
+end
+function O = dualTimes(A,B)
+    O.V = A.V*B.V;
+    O.D = A.V*B.D + A.D*B.V;
+end
+function O = dualBy(A,B)
+    O.V = A.V/B.V;
+    O.D = (B.V*A.D - A.V*B.D)/(B.V*B.V);
+end
