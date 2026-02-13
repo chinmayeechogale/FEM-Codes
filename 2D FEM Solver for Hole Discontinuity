@@ -287,3 +287,4 @@ function displacements = matrix_solve(K_global, F_global)
     displacements = K_global \ F_global; 
 end 
 
+%Results
