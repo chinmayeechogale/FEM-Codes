@@ -14,7 +14,7 @@ INP_FILE = 'A:\01. Academics\02. Semester 2\MEEN 673\01. Programming resources\F
 % =========================================================================
 
 % I N P U T   F I L E   R E A D E R
-% .........................................................................
+% ........................................................................
 
 % ADD YAML READER FUNCTIONS TO THE PATH
 addpath(genpath('YAML_MATLAB_0.4.3'));
