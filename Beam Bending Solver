@@ -1,0 +1,586 @@
+%% INPUT FILE 
+# =========================================================================
+#           F E M   1 D   S A M P L E   I N P U T   F I L E
+# =========================================================================
+# DOMAIN DATA
+# -------------------------------------------------------------------------
+X0: 0  # COORDINATE OF THE LEFT END OF THE DOMAIN
+L:  50 # LENGTH OF THE DOMAIN
+
+Q: [1,0,0] # QX0, QX1, QX2
+
+# BEAM PARAMETERS
+# -------------------------------------------------------------------------
+E: 30000000       # Young's Modulus
+CS_A: 1           # Cross Sectional Area
+Ks: 0.8333        # Shear Correction Coefficient
+Nu: 0.3           # Poisson's Ratio
+I:  0.08333   # Moment of Inertia
+
+# MESH DATA
+# -------------------------------------------------------------------------
+P:   1 # ELEMENT ORDER
+NEM: 8 # NUMBER OF ELEMENTS IN THE MESH
+
+# QUADRATURE RULE
+# -------------------------------------------------------------------------
+MODEL: 1 # 1=EB, 2=TBT 
+NGP: 2 # NUMBER OF GAUSS POINTS for full integration
+LGP: 1 #Number of Gauss Points for reduced integration
+
+# BOUNDARY CONDITIONS
+# -------------------------------------------------------------------------
+# COUNTS...
+NSPV: 3  # NUMBER OF DIRICHLET BOUNDARY CONDITIONS
+NSSV: 0  # NUMBER OF NEUMANN BOUNDARY CONDITIONS
+NSMB: 0  # NUMBER OF ROBIN BOUNDARY CONDITIONS
+# DIRICHLET BOUNDARY CONDITIONS...
+ISPV:
+ NODES: [1,9,9]
+ DOFS:  [2,1,3]
+VSPV:   [0,0,0]
+# NEUMANN BOUNDARY CONDITIONS...
+ISSV:
+ NODES: 
+ DOFS:
+VSSV:
+# ROBIN BOUNDARY CONDITIONS...
+ISMB:
+ NODES: [5]
+ DOFS:  [2]
+UREF:   [0]
+BETA0:  [3703.54]
+BETAU:  [0]
+
+# NONLINEAR ANALYSIS PARAMETERS
+# -------------------------------------------------------------------------
+NONLIN:  1    # SOLVER MODE (0 FOR LINEAR; 1 FOR PICARD; 2 FOR NEWTON)
+ITERMAX: 25   # MAXIMUM NUMBER OF ITERATIONS BEFORE TERMINATION
+EPSILON: 1e-3 # CONVERGENCE TOLERANCE
+GAMMA:   1    # RELAXATION PARAMETER
+LSTEP:   10   # Load Steps
+DP: [1,1,1,1,1,1,1,1,1,1]
+
+RECDOF: 26 # DOF THAT WILL BE PRINTED IN THE COMMAND WINDOW
+
+
+% =========================================================================
+%                               MAIN CODE
+% =========================================================================
+clear;clc;
+
+% =========================================================================
+%                  U S E R   I N P U T   S E C T I ON
+% =========================================================================
+
+% INPUT FILE PATH
+INP_FILE = 'INP_FILE_corrected.yaml';
+
+% =========================================================================
+%                           P R O C E S S O R
+% =========================================================================
+
+% I N P U T   F I L E   R E A D E R
+% .........................................................................
+% ADD YAML READER FUNCTIONS TO THE PATH
+% addpath(genpath('YAML_MATLAB_0.4.3'));
+
+% READ THE INPUT FI,LE AND EXTRACT REQUIRED VARIABLES
+INP_YAML = ReadYaml(INP_FILE);
+
+X0 = INP_YAML.X0; % X COORDINATE OF THE LEFT END OF THE DOMAIN
+L  = INP_YAML.L;  % LENGTH OF THE DOMAIN
+
+MODEL = INP_YAML.MODEL;
+
+E    = INP_YAML.E;     % Young's Modulus
+CS_A = INP_YAML.CS_A;  % Cross Sectional Area
+I    = INP_YAML.I;     % Moment of Inertia
+Ks   = INP_YAML.Ks;    % Shear Correction Coefficient
+Nu   = INP_YAML.Nu;    % Poisson's Ratio
+Q    = INP_YAML.Q;
+
+DATA.E    = E;
+DATA.CS_A = CS_A;
+DATA.Ks   = Ks;
+DATA.Nu   = Nu;
+
+DATA.AXX = E*CS_A;
+DATA.DXX = E*I;
+DATA.SXX = (Ks*E*CS_A)/(2*(1+Nu));
+
+[QX0, QX1, QX2] = deal(Q{:});
+DATA.QZ = @(X) QX0+QX1*X+QX2*X*X;
+DATA.FX = @(X)0; % << FIX THIS LATER IF THERE IS AXIAL DISTRIBUTED LOAD
+
+P    = INP_YAML.P;    % ELEMENT ORDER
+NEM  = INP_YAML.NEM;  % NUMBER OF ELEMENTS IN THE MESH
+NGPF  = INP_YAML.NGP; % NUMBER OF GAUSS POINTS
+NGPR  = INP_YAML.LGP; %Number of Gauss points for reduced integration
+NSPV = INP_YAML.NSPV; % NUMBER OF DIRICHLET BOUNDARY CONDITIONS
+NSSV = INP_YAML.NSSV; % NUMBER OF NEUMANN BOUNDARY CONDITIONS
+NSMB = INP_YAML.NSMB; % NUMBER OF ROBIN BOUNDARY CONDITIONS
+
+% NODES AND DEGREES OF FREEDOM WHERE THE 
+% PRIMARY VARIABLE IS PRESCRIBED...
+ISPV(:,1) = cell2mat(INP_YAML.ISPV.NODES);
+ISPV(:,2) = cell2mat(INP_YAML.ISPV.DOFS);
+VSPV      = cell2mat(INP_YAML.VSPV);
+
+% NODES AND DEGREES OF FREEDOM WHERE THE 
+% SECONDARY VARIABLE IS PRESCRIBED...
+if(NSSV>0)
+    ISSV(:,1) = cell2mat(INP_YAML.ISSV.NODES);
+    ISSV(:,2) = cell2mat(INP_YAML.ISSV.DOFS);
+    VSSV      = cell2mat(INP_YAML.VSSV);
+end
+
+% NODES AND DOFS WITH PRESCRIBED 
+% ROBIN (MIXED) BOUNDARY CONDITIONS...
+if(NSMB>0)
+    ISMB(:,1) = cell2mat(INP_YAML.ISMB.NODES);
+    ISMB(:,2) = cell2mat(INP_YAML.ISMB.DOFS);
+    UREF      = cell2mat(INP_YAML.UREF);
+    BETA0     = cell2mat(INP_YAML.BETA0);
+    BETAU     = cell2mat(INP_YAML.BETAU);
+end
+
+% NONLINEAR ANALYSIS PARAMETERS
+NONLIN  = INP_YAML.NONLIN;  % SOLVER MODE (0-LINEAR; 1-PICARD; 2-NEWTON)
+ITERMAX = INP_YAML.ITERMAX; % MAXIMUM NO. OF ITERATIONS BEFORE TERMINATION
+EPSILON = INP_YAML.EPSILON; % CONVERGENCE TOLERANCE
+GAMMA   = INP_YAML.GAMMA;   % RELAXATION PARAMETER
+LSTEP   = INP_YAML.LSTEP;  
+
+DP = cell2mat(INP_YAML.DP);
+RECDOF = INP_YAML.RECDOF;
+
+% M E S H   G E N E R A T I O N
+% .........................................................................
+
+[GLX,NOD,NNM,NPE] = MESH1D(X0,L,NEM,P);
+
+GFILE = "GAUSS.g";
+[FULL.SFL,FULL.DSFL,...
+ FULL.SFH,FULL.DSFH,FULL.DDSFH,...
+ FULL.GAUSWT] = PRECOMPUTE_SF(P,GFILE,NGPF);
+
+[REDU.SFL,REDU.DSFL,...
+ REDU.SFH,REDU.DSFH,REDU.DDSFH,...
+ REDU.GAUSWT] = PRECOMPUTE_SF(P,GFILE,NGPR);
+
+NDF = 3;
+NEQ = NNM*NDF;
+NET = NPE*NDF;
+W_MAX_ARRAY = [];
+GCU = zeros(NEQ,1);
+GPU = zeros(NEQ,1);
+F0 = 0.0;
+for NL = 1:LSTEP
+    CONVG = false;
+    if(NONLIN)
+        F0 = F0 + DP(NL);
+    else
+        F0 = 1;
+    end
+    for ITER = 1:ITERMAX
+        GLK = zeros(NEQ,NEQ);
+        GLF = zeros(NEQ,1);
+        for N = 1:NEM
+            NODES = NOD(N,:);
+            ELX   = GLX(NODES);
+            INDXS = zeros(1,NET);
+            S = 1;
+            for ND = 1:NDF
+                INDXS(S:NDF:end) = NDF*NODES - (NDF - S)*ones(1,NPE);
+                S = S + 1;
+            end
+            ELU = (1-GAMMA)*GPU(INDXS) + GAMMA*GCU(INDXS);
+            if(MODEL==1)
+                [ELK,ELF] = ELEMBEAM_EBT(DATA,ELU,ELX, ...
+                                         FULL,REDU,NGPF,NGPR, ...
+                                         F0,NONLIN);
+            else
+                [ELK,ELF] = ELEMBEAM_TBT(DATA,ELU,ELX,NPE,...
+                                         FULL,REDU,NGPF,NGPR, ...
+                                         F0,NONLIN);
+
+            end
+            GLK(INDXS,INDXS) = GLK(INDXS,INDXS)+ELK;
+            GLF(INDXS) = GLF(INDXS)+ELF;
+        end
+        if(NSPV>0)
+            for NP=1:NSPV
+                NB = (ISPV(NP,1)-1)*NDF+ISPV(NP,2);
+                for J=1:NEQ
+                    GLK(NB,J)  = 0;
+                    GLK(NB,NB) = 1;
+                    GLF(NB)    = VSPV(NP);
+                end
+            end
+        end
+        if(NSSV>0)
+            for NS=1:NSSV
+                NB = (ISSV(NS,1)-1)*NDF+ISSV(NS,2);
+                GLF(NB) = GLF(NB) + VSSV(NS);
+            end
+        end
+        if(NSMB>0)
+            for NR=1:NSMB
+                NB = (ISMB(NR,1)-1)*NDF+ISMB(NR,2);
+                GLK(NB,NB) = GLK(NB,NB) + BETA0(NR);
+                GLF(NB) = GLF(NB) + BETA0(NR)*UREF(NR);
+            end
+        end
+        SOLU = GLK\GLF;
+        GPU = GCU;
+        switch NONLIN
+            case 0
+                GCU = SOLU;
+                CONVG = true;
+                disp(SOLU(RECDOF));
+                disp('LINEAR ANALYSIS COMPLETE.');
+                break;
+            case 1
+                GCU = SOLU;
+            case 2
+                GCU = GCU + SOLU;
+        end
+
+        DELTAU = GCU(:,1) - GPU(:,1);
+        NUMER  = dot(DELTAU,DELTAU);
+        DENOM  = dot(GCU,GCU);
+        ERROR  = sqrt(NUMER/DENOM);
+        if(ERROR<=EPSILON)
+            CONVG = true;
+            disp(NL);
+            disp("LOAD STEP CONVERGED");
+            disp(ITER);
+            W_MAX = GCU(RECDOF);
+            W_MAX_ARRAY(end+1) = W_MAX;
+            disp(GCU(RECDOF));
+            disp(W_MAX_ARRAY);
+            break;
+        end
+    end
+    if(~CONVG)
+        disp("LOAD STEP FAILED TO CONVERGE. QUITTING...");
+        break;
+    end
+    if(NONLIN==0)
+        disp(GCU(RECDOF));
+        break;
+    end
+end
+
+
+
+function [ELK,ELF] = ELEMBEAM_EBT(DATA,ELU,ELX, ...
+                                  FULL,REDU,NGPF,NGPR, ...
+                                  F0,NONLIN)
+
+    AXX = DATA.AXX;
+    DXX = DATA.DXX;
+    FX  = DATA.FX;
+    QZ  = DATA.QZ;
+    NDF = 3;
+
+    ELK   = zeros(6,6);
+    ELF   = zeros(6,1);
+    ELK11 = zeros(2,2);
+    ELK12 = zeros(2,4);
+    ELK21 = zeros(4,2);
+    ELK22 = zeros(4,4);
+    ELF1  = zeros(2,1);
+    ELF2  = zeros(4,1);
+    if(NONLIN>1)
+        TAN   = zeros(6,6);
+        TAN12 = zeros(2,4);
+        TAN22 = zeros(4,4);
+    end
+
+    EL = (ELX(end) - ELX(1));
+    DETJ = 0.5*EL;
+    for NG = 1:NGPF
+        SFL    = FULL.SFL(:,NG);
+        DSFL   = FULL.DSFL(:,NG);
+        GDSFL  = DSFL/DETJ;
+
+        SFH    = FULL.SFH(:,NG).*[1;EL;1;EL];
+        DDSFH  = FULL.DDSFH(:,NG).*[1;EL;1;EL];
+        GDDSFH = DDSFH/DETJ/DETJ;
+
+        X = dot(SFL,ELX);
+        
+        CNST = DETJ*FULL.GAUSWT(NG);
+        ELK11 = ELK11 + AXX*(GDSFL)*GDSFL'*CNST;
+        ELK22 = ELK22 + DXX*(GDDSFH)*GDDSFH'*CNST;
+        ELF1  = ELF1 + F0*FX(X)*SFL*CNST;
+        ELF2  = ELF2 + F0*QZ(X)*SFH*CNST;
+    end
+
+    for NG = 1:NGPR 
+        DSFL   = REDU.DSFL(:,NG);
+        GDSFL  = DSFL/DETJ;
+        DSFH   = REDU.DSFH(:,NG).*[1;EL;1;EL];
+        GDSFH  = DSFH/DETJ;
+        if(NONLIN)
+            ELW = ELU([2,3,5,6]);
+            DWX = dot(ELW,GDSFH);
+        else
+            DWX = 0;
+        end
+        CNST  = DETJ*REDU.GAUSWT(NG);
+        ELK12 = ELK12 + 0.5*AXX*DWX*GDSFL*GDSFH'*CNST;
+        ELK21 = ELK21 + AXX*DWX*GDSFH*GDSFL'*CNST;
+        ELK22 = ELK22 + 0.5*AXX*DWX*DWX*(GDSFH)*GDSFH'*CNST;
+        if(NONLIN>1)
+            DUX = dot(ELU([1,4]),GDSFL);
+            TAN12 = TAN12 + 0.5*AXX*DWX*GDSFL*GDSFH'*CNST;
+            TAN22 = TAN22 + AXX*(DUX+DWX*DWX)*(GDSFH)*GDSFH'*CNST;
+        end
+    end
+
+    REMAP = [1,3,2,4];
+    ELK22_ = ELK22(REMAP,REMAP);
+    ELK12_ = ELK12(:,REMAP);
+    ELK21_ = ELK21(REMAP,:);
+    ELF2_  = ELF2(REMAP);
+    ELK(1:NDF:end,1:NDF:end) = ELK11;
+    ELK(1:NDF:end,2:NDF:end) = ELK12_(:,1:2);
+    ELK(1:NDF:end,3:NDF:end) = ELK12_(:,3:4);
+    ELK(2:NDF:end,1:NDF:end) = ELK21_(1:2,:);
+    ELK(3:NDF:end,1:NDF:end) = ELK21_(3:4,:);
+    ELK(2:NDF:end,2:NDF:end) = ELK22_(1:2,1:2);
+    ELK(2:NDF:end,3:NDF:end) = ELK22_(1:2,3:4);
+    ELK(3:NDF:end,2:NDF:end) = ELK22_(3:4,1:2);
+    ELK(3:NDF:end,3:NDF:end) = ELK22_(3:4,3:4);
+    if(NONLIN>1)
+        TAN22_ = TAN22(REMAP,REMAP);
+        TAN12_ = TAN12(:,REMAP);
+        TAN(1:NDF:end,2:NDF:end) = TAN12_(:,1:2);
+        TAN(1:NDF:end,3:NDF:end) = TAN12_(:,3:4);
+        TAN(2:NDF:end,2:NDF:end) = TAN22_(1:2,1:2);
+        TAN(2:NDF:end,3:NDF:end) = TAN22_(1:2,3:4);
+        TAN(3:NDF:end,2:NDF:end) = TAN22_(3:4,1:2);
+        TAN(3:NDF:end,3:NDF:end) = TAN22_(3:4,3:4);
+    end
+    ELF(1:NDF:end) = ELF1;
+    ELF(2:NDF:end) = ELF2_(1:2);
+    ELF(3:NDF:end) = ELF2_(3:4);
+
+    if(NONLIN>1)
+        ELF = ELF - ELK*ELU;
+        ELK = ELK + TAN;
+    end
+end
+
+function [ELK,ELF] = ELEMBEAM_TBT(DATA,ELU,ELX,NPE, ...
+                                  FULL,REDU,NGPF,NGPR, ...
+                                  F0,NONLIN)
+
+    AXX = DATA.AXX;
+    DXX = DATA.DXX;
+    SXX = DATA.SXX;
+    FX  = DATA.FX;
+    QZ  = DATA.QZ;
+    
+    NDF = 3;
+    NET = NPE*NDF;
+
+    ELK   = zeros(NET,NET);
+    ELF   = zeros(NET,1);
+    ELK11 = zeros(NPE,NPE);
+    ELK12 = zeros(NPE,NPE);
+    ELK21 = zeros(NPE,NPE);
+    ELK22 = zeros(NPE,NPE);
+    ELK23 = zeros(NPE,NPE);
+    ELK32 = zeros(NPE,NPE);
+    ELK33 = zeros(NPE,NPE);
+    ELF1  = zeros(NPE,1);
+    ELF2  = zeros(NPE,1);
+    if(NONLIN>1)
+        TAN   = zeros(NET,NET);
+        TAN12 = zeros(NPE,NPE);
+        TAN22 = zeros(NPE,NPE);
+    end
+
+    EL = (ELX(end) - ELX(1));
+    DETJ = 0.5*EL;
+    for NG = 1:NGPF
+        SFL    = FULL.SFL(:,NG);
+        DSFL   = FULL.DSFL(:,NG);
+        GDSFL  = DSFL/DETJ;
+
+        X = dot(SFL,ELX);
+        
+        CNST = DETJ*FULL.GAUSWT(NG);
+        ELK11 = ELK11 + AXX*(GDSFL)*GDSFL'*CNST;
+        ELK33 = ELK33 + DXX*(GDSFL)*GDSFL'*CNST;
+        ELF1  = ELF1 + F0*FX(X)*SFL*CNST;
+        ELF2  = ELF2 + F0*QZ(X)*SFL*CNST;
+    end
+
+    for NG = 1:NGPR 
+        SFL   = REDU.SFL(:,NG);
+        DSFL  = REDU.DSFL(:,NG);
+        GDSFL = DSFL/DETJ;
+        
+        if(NONLIN)
+            DWX = dot(ELU(2:NDF:end),GDSFL);
+        else
+            DWX = 0;
+        end
+        CNST  = DETJ*REDU.GAUSWT(NG);
+        ELK12 = ELK12 + 0.5*AXX*DWX*(GDSFL)*GDSFL'*CNST;
+        ELK21 = ELK21 + AXX*DWX*(GDSFL)*GDSFL'*CNST;
+        ELK22 = ELK22 + SXX*(GDSFL)*GDSFL'*CNST ...
+                      + 0.5*AXX*DWX*DWX*(GDSFL)*GDSFL'*CNST;
+        ELK23 = ELK23 + SXX*GDSFL*SFL'*CNST;
+        ELK32 = ELK32 + SXX*SFL*GDSFL'*CNST;
+        ELK33 = ELK33 + SXX*(SFL)*SFL'*CNST;
+        if(NONLIN>1)
+           DUX = dot(ELU(1:NDF:end),GDSFL);
+           TAN12 = TAN12 + 0.5*AXX*DWX*(GDSFL)*GDSFL'*CNST;
+           TAN22 = TAN22 + AXX*(DUX+DWX*DWX)*(GDSFL)*GDSFL'*CNST;
+        end
+    end
+
+    ELK(1:NDF:end,1:NDF:end) = ELK11;
+    ELK(1:NDF:end,2:NDF:end) = ELK12;
+    ELK(2:NDF:end,1:NDF:end) = ELK21;
+    ELK(2:NDF:end,2:NDF:end) = ELK22;
+    ELK(2:NDF:end,3:NDF:end) = ELK23;
+    ELK(3:NDF:end,2:NDF:end) = ELK32;
+    ELK(3:NDF:end,3:NDF:end) = ELK33;
+    ELF(1:NDF:end) = ELF1;
+    ELF(2:NDF:end) = ELF2;
+    if(NONLIN>1)
+        TAN(1:NDF:end,2:NDF:end) = TAN12;
+        TAN(2:NDF:end,2:NDF:end) = TAN22;
+    end
+    
+    if(NONLIN>1)
+        ELF = ELF - ELK*ELU;
+        ELK = ELK + TAN;
+    end
+end
+
+
+
+
+
+
+function [GLX,NOD,NNM,NPE] = MESH1D(X0,L,NEM,P)
+    NPE = P + 1; % NODES PER ELEMENT
+    NNM = NEM*NPE - (NEM-1); % NUMBER OF NODES IN THE MESH
+    GLX = linspace(X0,X0+L,NNM); % NODE COORDINATES
+    % GENERATE ELEMENT CONNECTIVITY MATRIX
+    NOD=zeros(NEM,NPE);
+    K = 1;
+    for I=1:NEM
+        NOD(I,:) = linspace(K,K+P,NPE);
+        K = K+P;
+    end
+end
+
+function [SFL_ARRAY,DSFL_ARRAY,...
+          SFH_ARRAY,DSFH_ARRAY,DDSFH_ARRAY,...
+          GAUSWT] = PRECOMPUTE_SF(P,GFILE,NGP)
+
+    NPE = P + 1; % NUMBER OF NODES PER ELEMENT
+    XIS = linspace(-1,1,NPE); % EVENLY-SPACED NODES
+    [GAUSPT,GAUSWT] = GAUSS(GFILE,NGP); % GAUSS WEIGHTS AND POINTS
+    % INTIALIZE...
+    SFL_ARRAY   = zeros(NPE,NGP);
+    DSFL_ARRAY  = zeros(NPE,NGP);
+    SFH_ARRAY   = zeros(4,NGP);
+    DSFH_ARRAY  = zeros(4,NGP);
+    DDSFH_ARRAY = zeros(4,NGP);
+
+    for NG = 1:NGP
+        XI = GAUSPT(NG);
+        [SFL,DSFL] = SHAPE1D(XI,P,XIS);
+        SFL_ARRAY(:,NG) = SFL;
+        DSFL_ARRAY(:,NG) = DSFL;
+        [SFH,DSFH,DDSFH]  = HERMITE1D(XI,1);
+        SFH_ARRAY(:,NG)   = SFH;
+        DSFH_ARRAY(:,NG)  = DSFH;
+        DDSFH_ARRAY(:,NG) = DDSFH;
+    end
+end
+
+function [GAUSPT,GAUSWT] = GAUSS(GFILE,NGP)
+    FILEID  = fopen(GFILE);
+    TLINE   = fgetl(FILEID);
+    TLINES  = cell(50,1);
+    K = 1;
+    while ischar(TLINE)
+        TLINES{K,1} = TLINE; TLINE = fgetl(FILEID); K = K + 1;
+    end
+    fclose(FILEID);
+    LINE = TLINES{2};
+    CONT = textscan(LINE,'%f','Delimiter',',');
+    SF_S = CONT{1};
+    SF   = SF_S(NGP);
+    GAUSPT = zeros(NGP,1);
+    GAUSWT = zeros(NGP,1);
+    for NI = 1:NGP
+        LINE = TLINES{SF};
+        CONT = textscan(LINE,'%f %f %f');
+        GAUSWT(NI) = CONT{2};
+        GAUSPT(NI) = CONT{3};
+        SF = SF + 1;
+    end
+end
+
+function [SFL,DSFL] = SHAPE1D(XI,P,XIS)
+    % INITIALIZE...
+    SFL  = zeros(P+1,1);
+    DSFL = zeros(P+1,1);
+    for I = 1:P+1
+        % DEFINE DUAL VARIABLE AND SET SEED
+        DualXI  = struct('V',XI,'D',1);
+        DualPSI = struct('V',1,'D',0);
+        for K = 1:P+1
+            if(I==K)
+                continue
+            end
+            DualTEMP1 = dualPlus(DualXI,struct('V',-XIS(K),'D',0));
+            DualTEMP2 = struct('V',XIS(I)-XIS(K),'D',0);
+            DualTEMP3 = dualBy(DualTEMP1,DualTEMP2);
+            DualPSI   = dualTimes(DualPSI,DualTEMP3);
+            SFL(I)    = DualPSI.V;
+            DSFL(I)   = DualPSI.D;
+        end
+    end
+end
+
+% FUNCTIONS FOR AUTOMATIC DIFFERENTIATION
+function O = dualPlus(A,B)
+    O.V = A.V + B.V;
+    O.D = A.D + B.D;
+end
+function O = dualTimes(A,B)
+    O.V = A.V*B.V;
+    O.D = A.V*B.D + A.D*B.V;
+end
+function O = dualBy(A,B)
+    O.V = A.V/B.V;
+    O.D = (B.V*A.D - A.V*B.D)/(B.V*B.V);
+end
+
+function [SFH,DSFH,DDSFH] = HERMITE1D(XI,EL)
+        SFH(1)   = 0.25*(2.0-3.0*XI+XI^3);
+        SFH(2)   = -0.125*EL*(1.0-XI)*(1.0-XI*XI);
+        SFH(3)   = 0.25*(2.0+3.0*XI-XI^3);
+        SFH(4)   = 0.125*EL*(1.0+XI)*(1.0-XI*XI);
+        DSFH(1)  = -0.75*(1.0-XI*XI);
+        DSFH(2)  = 0.125*EL*(1.0+2.0*XI-3.0*XI*XI);
+        DSFH(3)  = 0.75*(1.0-XI*XI);
+        DSFH(4)  = 0.125*EL*(1.0-2.0*XI-3.0*XI*XI);
+        DDSFH(1) = 1.5*XI;
+        DDSFH(2) = 0.25*EL*(1.0-3.0*XI);
+        DDSFH(3) = -1.5*XI;
+        DDSFH(4) = -0.25*EL*(1.0+3.0*XI);
+end
