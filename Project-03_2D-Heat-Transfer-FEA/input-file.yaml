@@ -1,0 +1,159 @@
+# =============================================================
+# INPUT FILE: Project 03 - 2D Heat Transfer FEA
+# =============================================================
+
+# -------------------------------------------------------------
+# PROBLEM DESCRIPTION
+# -------------------------------------------------------------
+TITLE:     "2D Heat Transfer FEA - Square Plate with Heat Source"
+DIMENSION: 2             # 2D problem
+ANALYSIS:  STEADY_STATE  # STEADY_STATE or TRANSIENT
+ELEMENT_TYPE: Q4         # Q4 = 4-node quad; CST = 3-node triangle
+
+# -------------------------------------------------------------
+# MESH PARAMETERS
+# -------------------------------------------------------------
+MESH:
+  # Node coordinates: [x, y] in meters
+  NODES:
+    1:  [0.0, 0.0]
+    2:  [0.25, 0.0]
+    3:  [0.5, 0.0]
+    4:  [0.75, 0.0]
+    5:  [1.0, 0.0]
+    6:  [0.0, 0.25]
+    7:  [0.25, 0.25]
+    8:  [0.5, 0.25]
+    9:  [0.75, 0.25]
+    10: [1.0, 0.25]
+    11: [0.0, 0.5]
+    12: [0.25, 0.5]
+    13: [0.5, 0.5]
+    14: [0.75, 0.5]
+    15: [1.0, 0.5]
+    16: [0.0, 0.75]
+    17: [0.25, 0.75]
+    18: [0.5, 0.75]
+    19: [0.75, 0.75]
+    20: [1.0, 0.75]
+    21: [0.0, 1.0]
+    22: [0.25, 1.0]
+    23: [0.5, 1.0]
+    24: [0.75, 1.0]
+    25: [1.0, 1.0]
+
+  # Element connectivity: [n1, n2, n3, n4] (counter-clockwise)
+  ELEMENTS:
+    1:  [1,  2,  7,  6]
+    2:  [2,  3,  8,  7]
+    3:  [3,  4,  9,  8]
+    4:  [4,  5,  10, 9]
+    5:  [6,  7,  12, 11]
+    6:  [7,  8,  13, 12]
+    7:  [8,  9,  14, 13]
+    8:  [9,  10, 15, 14]
+    9:  [11, 12, 17, 16]
+    10: [12, 13, 18, 17]
+    11: [13, 14, 19, 18]
+    12: [14, 15, 20, 19]
+    13: [16, 17, 22, 21]
+    14: [17, 18, 23, 22]
+    15: [18, 19, 24, 23]
+    16: [19, 20, 25, 24]
+
+# -------------------------------------------------------------
+# MATERIAL PROPERTIES
+# -------------------------------------------------------------
+MATERIAL:
+  KX:    50.0      # Thermal conductivity in x-direction [W/m*K]
+  KY:    50.0      # Thermal conductivity in y-direction [W/m*K]
+  RHO:   7850.0    # Density [kg/m^3] (used in transient analysis)
+  CP:    460.0     # Specific heat capacity [J/kg*K] (transient only)
+  MODEL: LINEAR    # LINEAR or NONLINEAR (T-dependent conductivity)
+
+  # Nonlinear parameters (used if MODEL: NONLINEAR)
+  # k(T) = K0 + K1*T + K2*T^2
+  NONLINEAR:
+    K0: 50.0       # Base conductivity [W/m*K]
+    K1: -0.01      # Linear temperature coefficient [W/m*K^2]
+    K2: 0.0        # Quadratic temperature coefficient [W/m*K^3]
+
+# -------------------------------------------------------------
+# BOUNDARY CONDITIONS
+# -------------------------------------------------------------
+BOUNDARY_CONDITIONS:
+
+  # DIRICHLET: Prescribed temperature BCs
+  # Format: node: T_prescribed [K or degC]
+  DIRICHLET:
+    1:  100.0    # Bottom-left corner
+    2:  100.0
+    3:  100.0
+    4:  100.0
+    5:  100.0    # Bottom-right corner
+    21: 300.0    # Top-left corner
+    22: 300.0
+    23: 300.0
+    24: 300.0
+    25: 300.0    # Top-right corner
+
+  # NEUMANN: Prescribed heat flux [W/m^2]
+  # Format: node: q_n (positive = heat in)
+  NEUMANN:
+    6:  0.0      # Left edge - insulated
+    11: 0.0
+    16: 0.0
+    10: 0.0      # Right edge - insulated
+    15: 0.0
+    20: 0.0
+
+  # ROBIN: Convection boundary condition
+  # Format: node: [h, T_inf] where h = heat transfer coefficient [W/m^2*K]
+  ROBIN:
+    # No convection boundaries in this example
+    # Example: 10: [25.0, 20.0]  # h=25 W/m^2*K, T_inf=20 degC
+
+# -------------------------------------------------------------
+# HEAT SOURCE / GENERATION
+# -------------------------------------------------------------
+SOURCE:
+  Q: 1000.0     # Uniform volumetric heat generation [W/m^3]
+                # Set to 0.0 if no internal heat source
+
+# -------------------------------------------------------------
+# SOLVER PARAMETERS
+# -------------------------------------------------------------
+SOLVER:
+  MODE:     0       # 0 = Linear; 1 = Picard; 2 = Newton-Raphson
+  MAX_ITER: 50      # Maximum nonlinear iterations
+  TOL:      1.0e-6  # Convergence tolerance
+  GAMMA:    1.0     # Relaxation factor
+
+# -------------------------------------------------------------
+# TRANSIENT PARAMETERS (used if ANALYSIS: TRANSIENT)
+# -------------------------------------------------------------
+TRANSIENT:
+  T_START:   0.0     # Start time [s]
+  T_END:     100.0   # End time [s]
+  DT:        1.0     # Time step size [s]
+  SCHEME:    BACKWARD_EULER   # BACKWARD_EULER or CRANK_NICOLSON
+  T_INIT:    20.0    # Initial (uniform) temperature [K or degC]
+  SAVE_FREQ: 10      # Save output every N time steps
+  MONITOR_NODES: [13]  # Nodes to track temperature history
+
+# -------------------------------------------------------------
+# NUMERICAL INTEGRATION
+# -------------------------------------------------------------
+INTEGRATION:
+  ORDER: 2    # Gauss quadrature order (2x2 for Q4)
+
+# -------------------------------------------------------------
+# OUTPUT OPTIONS
+# -------------------------------------------------------------
+OUTPUT:
+  TEMPERATURE:   true
+  HEAT_FLUX:     true
+  GRADIENT:      true
+  CONVERGENCE:   true
+  TIME_HISTORY:  true    # Transient only
+  FORMAT:        csv     # csv or vtk
