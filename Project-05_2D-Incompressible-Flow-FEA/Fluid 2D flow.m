@@ -1,0 +1,856 @@
+
+clear;clc;
+
+% INPUT FILE PATH
+INP_FILE = 'SAMPLE_INPUT_FILE2D.yaml';
+
+% READ THE INPUT FILE AND EXTRACT REQUIRED VARIABLES
+INP_YAML = ReadYaml(INP_FILE);
+
+X0 = INP_YAML.X0; % X COORDINATE OF THE BOTTOM-LEFT CORNER OF THE DOMAIN
+Y0 = INP_YAML.Y0; % Y COORDINATE OF THE BOTTOM-LEFT CORNER OF THE DOMAIN
+DX = cell2mat(INP_YAML.DX); % ELEMENT LENGTHS ALONG X
+DY = cell2mat(INP_YAML.DY); % ELEMENT LENGTHS ALONG Y
+NPE = INP_YAML.NPE; % NODES PER ELEMENT
+
+%READING TIME PARAMETERS
+ITEM = INP_YAML.ITEM;
+DT = INP_YAML.TIMESTEP;
+NTIME = INP_YAML.NTIME;
+
+%READING STABILITY PARAMETERS
+ALPHA =INP_YAML.ALPHA;
+NEW = INP_YAML.NEW;
+
+POINT = INP_YAML.POINT;
+
+%INPUTS
+VIS = INP_YAML.VIS;
+RHO = INP_YAML.RHO;
+GAMMA = INP_YAML.GAMMA;
+
+FX = INP_YAML.FX;
+[DATA.FX0, DATA.FXX, DATA.FXY] = deal(FX{:});
+FY = INP_YAML.FY;
+[DATA.FY0, DATA.FYX, DATA.FYY] = deal(FY{:});
+
+DATA.A1 = ALPHA*DT;
+DATA.A2 = (1-ALPHA)*DT;
+
+if ITEM>1
+    DATA.A3 = 2/(NEW*DT^2);
+    DATA.A4 = DATA.A3*DT;
+    DATA.A5 = 1/NEW - 1;
+    DATA.A6 = (2*ALPHA)/(NEW*DT);
+    DATA.A7 = (2*ALPHA)/NEW - 1;
+    DATA.A8 = DT*((ALPHA/NEW)-1);
+else
+    DATA.A3 = 0;
+    DATA.A4 = 0;
+    DATA.A5 = 0;
+    DATA.A6 = 0;
+    DATA.A7 = 0;
+    DATA.A8 = 0;
+end
+
+NGP  = INP_YAML.NGP;  % NUMBER OF GAUSS POINTS PER DIRECTION
+LGP = INP_YAML.LGP;
+%NSPV = INP_YAML.NSPV; % NUMBER OF DIRICHLET BOUNDARY CONDITIONS
+%NSSV = INP_YAML.NSSV; % NUMBER OF NEUMANN BOUNDARY CONDITIONS
+NSMB = INP_YAML.NSMB; % NUMBER OF ROBIN BOUNDARY CONDITIONS
+
+% NODES AND DEGREES OF FREEDOM WHERE THE 
+% PRIMARY VARIABLE IS PRESCRIBED...
+% ISPV(:,1) = cell2mat(INP_YAML.ISPV.NODES);
+% ISPV(:,2) = cell2mat(INP_YAML.ISPV.DOFS);
+% VSPV      = cell2mat(INP_YAML.VSPV);
+% 
+% % NODES AND DEGREES OF FREEDOM WHERE THE 
+% % SECONDARY VARIABLE IS PRESCRIBED...
+% if(NSSV>0)
+%     ISSV(:,1) = cell2mat(INP_YAML.ISSV.NODES);
+%     ISSV(:,2) = cell2mat(INP_YAML.ISSV.DOFS);
+%     VSSV      = cell2mat(INP_YAML.VSSV);
+% end
+
+% NODES AND DOFS WITH PRESCRIBED 
+% ROBIN (MIXED) BOUNDARY CONDITIONS...
+if(NSMB>0)
+    ISMB(:,1) = cell2mat(INP_YAML.ISMB.NODES);
+    ISMB(:,2) = cell2mat(INP_YAML.ISMB.DOFS);
+    UREF      = cell2mat(INP_YAML.UREF);
+    BETA0     = cell2mat(INP_YAML.BETA0);
+    BETAU     = cell2mat(INP_YAML.BETAU);
+end
+
+% NONLINEAR ANALYSIS PARAMETERS
+NONLIN  = INP_YAML.NONLIN;  % SOLVER MODE (0-LINEAR; 1-PICARD; 2-NEWTON)
+ITERMAX = INP_YAML.ITERMAX; % MAXIMUM NO. OF ITERATIONS BEFORE TERMINATION
+EPSILON = INP_YAML.EPSILON; % CONVERGENCE TOLERANCE
+RELAX   = INP_YAML.RELAX;   % RELAXATION PARAMETER
+
+
+% M E S H   G E N E R A T I O N
+% .........................................................................
+
+% CALL THE 2D MESHING FUNCTION
+NX = numel(DX);
+NY = numel(DY);
+[NOD, GLXY, NEM, NNM] = MESH2DR(NX,NY,NPE,DX,DY,X0,Y0);
+
+% REMARKS:
+% GLXY - ARRAY OF NODE COORDINATES
+% NOD  - ELEMENT CONNECTIVITY MATRIX
+% NNM  - TOTAL NUMBER OF NODES IN THE MESH
+% NPE  - NUMBER OF NODES PER ELEMENT
+
+% PRECOMPUTATION OF SHAPE FUNCTIONS AND THEIR 
+% DERIVATIVES AT INTEGRATION POINTS
+GFILE = "GAUSS.g"; % DATABASE OF GAUSS QUADRATURE DATA
+[GAUSWT_FULL,SFL_FULL,DSFL_FULL] = PRECOMPUTE_SF2D(GFILE,NGP,NPE);
+[GAUSWT_REDU,SFL_REDU,DSFL_REDU] = PRECOMPUTE_SF2D(GFILE,LGP,NPE);
+
+XMIN = min(GLXY(:,1));  XMAX = max(GLXY(:,1));
+YMIN = min(GLXY(:,2));  YMAX = max(GLXY(:,2));
+TOL  = 1e-10;
+
+%Sorting Primary Varible/Dirchlet BC
+PV_SIDES = INP_YAML.ISPV.SIDES;
+PV_DOFS  = cell2mat(INP_YAML.ISPV.DOFS);
+PV_VALS  = cell2mat(INP_YAML.VSPV);
+
+ISPV = [];
+VSPV = [];
+
+for P = 1:length(PV_SIDES)
+    S_PV = char(PV_SIDES{P});
+
+    switch upper(S_PV)
+        case 'L'
+            NODES_PV = find(abs(GLXY(:,1)-XMIN) < TOL);
+        case 'R'
+            NODES_PV = find(abs(GLXY(:,1)-XMAX) < TOL);
+        case 'B'
+            NODES_PV = find(abs(GLXY(:,2)-YMIN) < TOL);
+        case 'T'
+            NODES_PV = find(abs(GLXY(:,2)-YMAX) < TOL);
+        otherwise
+            error('Unknown side label');
+    end
+
+    NODES_PV = sort(NODES_PV);
+
+    ISPV = [ISPV; [NODES_PV, PV_DOFS(P)*ones(length(NODES_PV),1)]];
+    VSPV = [VSPV; PV_VALS(P)*ones(length(NODES_PV),1)];
+end
+
+NSPV = size(ISPV,1);
+
+%Sorting Secondary Varibles
+SV_SIDES = INP_YAML.ISSV.SIDES;
+SV_DOFS  = cell2mat(INP_YAML.ISSV.DOFS);
+SV_VALS  = cell2mat(INP_YAML.VSSV);
+
+ISSV = [];
+VSSV = [];
+
+for k = 1:length(SV_SIDES)
+    s = char(SV_SIDES{k});
+
+    switch upper(s)
+        case 'L'
+            NODES_SV = find(abs(GLXY(:,1)-XMIN) < TOL);
+        case 'R'
+            NODES_SV = find(abs(GLXY(:,1)-XMAX) < TOL);
+        case 'B'
+            NODES_SV = find(abs(GLXY(:,2)-YMIN) < TOL);
+        case 'T'
+            NODES_SV = find(abs(GLXY(:,2)-YMAX) < TOL);
+        otherwise
+            error('Unknown side label');
+    end
+
+    NODES_SV = sort(NODES_SV);
+
+    ISSV = [ISSV; [NODES_SV, SV_DOFS(k)*ones(length(NODES_SV),1)]];
+    sv_val = SV_VALS(k);
+    if ITEM == 1
+        sv_val = DT*sv_val;
+    end
+    VSSV = [VSSV; sv_val*ones(length(NODES_SV),1)];
+end
+
+NSSV = size(ISSV,1);
+% F I N I T E   E L E M E N T   S O L V E R
+% .........................................................................
+
+NDF = 2;       % NUMBER OF DEGREES OF FREEDOM PER NODE
+NEQ = NNM*NDF; % NUMBER OF EQUATIONS IN THE GLOBAL SYSTEM
+NET = NPE*NDF; % NUMBER OF ELEMENT LEVEL EQUATIONS
+
+% INITIALIZE THE SOLUTION ARRAYS
+GCU = zeros(NEQ,1);   % GLOBAL SOLUTION ARRAY (CURRENT ITERATION)
+GPU = zeros(NEQ,1);   % GLOBAL SOLUTION ARRAY (PREVIOUS ITERATION)
+
+GLPU = zeros(NEQ,1); %PREVIOUS TIMESTEP SOLUTION
+GLPV = zeros(NEQ,1);
+GLPA = zeros(NEQ,1);
+GLCU = zeros(NEQ,1); %CURRENT TIMESTEP SOLUTION
+GLCV = zeros(NEQ,1);
+GLCA = zeros(NEQ,1);
+GLC = zeros(NEQ,1); %CURRENT TIMESTEP & CURRENT ITERATION SOLUTION
+
+TIME_HIST = zeros(NTIME,1);
+
+%TIME LOOP
+for T = 1:NTIME
+    TIME = T*DT;
+    
+    % NONLINEAR SOLUTION ITERATION LOOP
+    for ITER = 1:ITERMAX
+        
+        % INITIALIZE GLOBAL STIFFNESS AND FORCE...
+        GLK = zeros(NEQ,NEQ); % GLOBAL 'STIFFNESS' MATRIX
+        GLF = zeros(NEQ,1);   % GLOBAL 'FORCE' VECTOR
+    
+        % LOOP OVER ELEMENTS
+        for N=1:NEM
+            NODES = NOD(N,:);      % NODES OF CURRENT ELEMENT
+            ELXY  = GLXY(NODES,:); % NODAL COORDINATES OF CURRENT ELEMENT
+        
+            % CONSTRUCT GLOBAL-TO-LOCAL DOF MAP
+            INDXS = zeros(1,NET);
+            S = 1;
+            for ND = 1:NDF
+                INDXS(S:NDF:end) = NDF*NODES - (NDF - S)*ones(1,NPE);
+                S = S + 1;
+            end
+            
+            % Compute the element-level solution arrays
+            ELPU = GLPU(INDXS);
+            ELPV = GLPV(INDXS);
+            ELPA = GLPA(INDXS);
+            %ELCU = GLCU(INDXS);
+            ELCV = GLCV(INDXS);
+            ELCA = GLCA(INDXS);
+
+            % ELEMENT SOLUTION ARRAY AFTER APPLYING RELAXATION
+            ELCU = (1-RELAX)*GPU(INDXS) + RELAX*GLCU(INDXS);
+            
+            % CALL ELEMENT-LEVEL ROUTINE TO COMPUTE 
+            % THE ELEMENT COEFFICIENT ARRAYS
+            [ELK,ELF,ELK_EFF,ELF_EFF] = ELEMAT2D(DATA,SFL_FULL,DSFL_FULL,GAUSWT_FULL,SFL_REDU,DSFL_REDU,GAUSWT_REDU,NONLIN,...
+                                  ELXY,ELPU,ELCU,VIS,RHO,GAMMA,LGP,ITEM);
+    
+            % ASSEMBLE ELEMENT-LEVEL EQUATIONS INTO THE GLOBAL SYSTEM
+            GLK(INDXS,INDXS) = GLK(INDXS,INDXS)+ELK_EFF;
+            GLF(INDXS) = GLF(INDXS)+ELF_EFF;
+        end
+    
+        % MODIFY GLOBAL MATRICES (GLK, GLF) TO 
+        % ENFORCE DIRICHLET BOUNDARY CONDITIONS
+        if(NSPV>0)
+    
+            for NP=1:NSPV
+                NB = (ISPV(NP,1)-1)*NDF+ISPV(NP,2);
+                for J=1:NEQ
+                    GLK(NB,J)  = 0;
+                    GLK(NB,NB) = 1;
+                    if NONLIN <= 1
+                    GLF(NB) = VSPV(NP);              % total value for linear/direct iteration
+                    else
+                    GLF(NB) = VSPV(NP) - GLCU(NB);    % correction for Newton
+                    end
+                end
+            end
+        end
+        
+        % MODIFY THE FORCE VECTOR TO INCLUDE SPECIFIED NONZERO 
+        % SECONDARY VARIABLES IN THE FULL MATRIX SYSTEM
+        if(NSSV>0)
+            for NS=1:NSSV
+                NB = (ISSV(NS,1)-1)*NDF+ISSV(NS,2);
+                GLF(NB) = GLF(NB) + VSSV(NS);
+                
+            end
+        end
+    
+        % IMPLEMENT THE SPECIFIED ROBIN BOUNDARY CONDITIONS
+        if(NSMB>0)
+            for MB=1:NSMB
+                NB = (ISMB(MB,1)-1)*NDF+ISMB(MB,2);
+                if(NONLIN<=1)
+                    GLK(NB,NB)=GLK(NB,NB)+BETA0(MB)+BETAU(MB)*GLCU(NB);
+                    GLF(NB)=GLF(NB)+UREF(MB)*(BETA0(MB)+BETAU(MB)*GLCU(NB));
+                else
+                    GLK(NB,NB)= GLK(NB,NB)+BETA0(MB)+2.0*BETAU(MB)*GLCU(NB)...
+     	                                      -UREF(MB)*BETAU(MB);
+                    GLF(NB)= GLF(NB)+UREF(MB)*(BETA0(MB) ...
+                                +BETAU(MB)*GLCU(NB))-(BETA0(MB) ...
+                                +BETAU(MB)*GLCU(NB))*GLCU(NB);
+                end
+            end
+        end
+    
+        % SOLVE SYSTEM OF SIMULTANEOUS LINEAR EQUATIONS. 
+        SOLU = GLK\GLF;
+        %GLPU=GLCU;
+        if(NONLIN==0)
+            GLCU=SOLU;
+            disp("LINEAR SOLUTION COMPLETE.");
+            break;
+        end
+        if NONLIN==1
+            GPU = GLCU;
+            GLCU = SOLU;
+            DU = GLCU - GPU;
+            ERR = norm(DU)/norm(GLCU);
+            if ERR<EPSILON
+                break;
+            end
+        elseif NONLIN>1
+            GPU = GLCU;
+            GLCU = GLCU + SOLU;
+            if norm(SOLU) < EPSILON
+                break;
+            end
+        end
+       
+    end
+    %GPU = GLPU;
+    % GLPU = GLCU;
+
+    if ITEM>1
+        GLCA = DATA.A3 *(GLCU-GLPU) - DATA.A4*GLPV - DATA.A5*GLPA;
+        GLCV = GLPV +DATA.A1*GLCA + DATA.A2*GLPA;
+        GLPA = GLCA;
+        GLPV = GLCV;
+    end
+    GLPU = GLCU;
+    disp(GLCU);
+    %TIME_HIST(T,:) = GLCU(POINT);
+    POINT = [27 45 63 81 99 117 135];
+    TIME_HIST = zeros(1,numel(POINT));
+    
+    for T = 1:7
+        TIME_HIST(T,:) = GLCU(POINT).';
+    end
+    % =========================================================================
+    % POST-PROCESSING: PRESSURE AT REDUCED GAUSS POINTS
+    % Reddy penalty model:  P = -GAMMA * div(v)
+    % =========================================================================
+    [PGXY, PVAL, DIVV, ELEM_ID, GP_ID] = POST_PRESSURE_PENALTY_2D( ...
+        NOD, GLXY, GLCU, NPE, NDF, SFL_REDU, DSFL_REDU, GAUSWT_REDU, GAMMA);
+    
+    % Display as a table
+    PRESSURE_TABLE = table(ELEM_ID(:), GP_ID(:), PGXY(:,1), PGXY(:,2), DIVV(:), PVAL(:), ...
+        'VariableNames', {'Element','GaussPoint','X','Y','Divergence','Pressure'});
+    disp(PRESSURE_TABLE);
+    
+    % Optional: scatter plot of pressure at reduced Gauss points
+    figure;
+    scatter(PGXY(:,1), PGXY(:,2), 80, PVAL, 'filled');
+    colorbar;
+    xlabel('x'); ylabel('y');
+    title('Pressure at reduced Gauss points');
+    axis equal tight;
+end
+% END OF THE NONLINEAR SOLUTION ITERATION LOOP
+
+function [ELK,ELF,ELK_EFF,ELF_EFF] = ELEMAT2D(DATA,SFL_FULL,DSFL_FULL,GAUSWT_FULL,SFL_REDU,DSFL_REDU,GAUSWT_REDU,NONLIN,...
+                                  ELXY,ELPU,ELCU,VIS,RHO,GAMMA,LGP,ITEM)
+    
+    NDF = 2;            % DEGREES OF FREEDOM PER NODE
+    NPE = size(ELXY,1); % NODES PER ELEMENT
+    NET = NPE*NDF;      % NUMBER OF ELEMENT LEVEL EQUATIONS
+    
+    % EXTRACT PDE COEFFICIENTS FROM THE DATA STRUCT
+    % [A0] = deal(DATA.A0);
+    % [A10, A1X, A1Y, A1U, A1UX, A1UY] = ... 
+    %     deal(DATA.A10, DATA.A1X, DATA.A1Y, DATA.A1U, DATA.A1UX, DATA.A1UY);
+    % [A20, A2X, A2Y, A2U, A2UX, A2UY] = ... 
+    %     deal(DATA.A20, DATA.A2X, DATA.A2Y, DATA.A2U, DATA.A2UX, DATA.A2UY);
+    [FX0, FXX, FXY] = ...
+        deal(DATA.FX0, DATA.FXX, DATA.FXY);
+    [FY0, FYX, FYY] = ...
+        deal(DATA.FY0, DATA.FYX, DATA.FYY);
+    % [C10, C1X1, C1Y1] = deal(DATA.C10, DATA.C1X1, DATA.C1Y1);
+    % [C20, C2X1, C2Y1] = deal(DATA.C20, DATA.C2X1, DATA.C2Y1);
+    
+    % INITIALIZE ELEMENT COEFFICIENTS
+    ELC0 = zeros(NET,NET);  %PREVIOUS TIME STEP MATRIX
+    ELK_VIS = zeros(NET,NET);
+    ELF = zeros(NET,1);
+    ELM = zeros(NET, NET);
+    ELC = zeros(NET, NET);
+    ELK_PEN = zeros(NET,NET);
+    
+    if(NONLIN>1)
+        % PART OF THE ELEMENT-LEVEL TANGENT MATRIX THAT ADDS TO ELK
+        TAN = zeros(NET,NET);
+    end
+    
+    % NUMBER OF GAUSS POINTS
+    NGP2 = size(GAUSWT_FULL,1);
+    NGPR = size(GAUSWT_REDU,1);
+
+    % INTEGRATION LOOP
+    for NG = 1:NGP2
+        
+        % SHAPE FUNCTION DATA AT CURRENT GAUSS POINT
+        SFL   = SFL_FULL(:,NG);     % SHAPE FUNCTIONS
+        DSFL  = DSFL_FULL(:,:,NG);  % SHAPE FUNCTION DERIVATIVES (LOCAL)
+        JACOB = ELXY'*DSFL;          % JACOBIAN OF TRANSFORMATION
+        GDSFL = DSFL/JACOB;          % SHAPE FUNCTION DERIVATIVES (GLOBAL)
+        CNST  = det(JACOB)*GAUSWT_FULL(NG);
+        
+        % GLOBAL COORDINATES OF THE CURRENT GAUSS POINT
+        X = dot(ELXY(:,1),SFL);
+        Y = dot(ELXY(:,2),SFL);
+
+        %S00 = SFL * SFL' * CNST;
+        
+        
+        % U0   = ELPU*SFL';        % 'u'
+        % U   = ELCU*SFL';        % 'u'
+        
+        IX = 1:2:NET;
+        IY = 2:2:NET;
+                    
+        VX0 = SFL' * ELPU(IX);
+        VY0= SFL' * ELPU(IY);
+        VX  = SFL' * ELCU(IX);
+        VY  = SFL' * ELCU(IY);
+
+        S11 = VIS * GDSFL(:,1)*GDSFL(:,1)'*CNST;
+        S12 = VIS * GDSFL(:,1)*GDSFL(:,2)'*CNST;
+        S22 = VIS * GDSFL(:,2)*GDSFL(:,2)'*CNST;
+
+               
+        FX = FX0 + FXX*X + FXY*Y;
+        FY = FY0 + FYX*X + FYY*Y;
+
+        ADV0 = VX0*GDSFL(:,1) + VY0*GDSFL(:,2);
+        ADV  = VX *GDSFL(:,1) + VY *GDSFL(:,2);
+        
+        ELC0(1:2:NET,1:2:NET) = ELC0(1:2:NET,1:2:NET) + RHO*(SFL*ADV0.')*CNST;
+        ELC0(2:2:NET,2:2:NET) = ELC0(2:2:NET,2:2:NET) + RHO*(SFL*ADV0.')*CNST;
+        ELC(1:2:NET,1:2:NET)  = ELC(1:2:NET,1:2:NET)  + RHO*(SFL*ADV.')*CNST;
+        ELC(2:2:NET,2:2:NET)  = ELC(2:2:NET,2:2:NET)  + RHO*(SFL*ADV.')*CNST;
+
+        ELF(1:2:NET) = ELF(1:2:NET) + FX*SFL*CNST;
+        ELF(2:2:NET) = ELF(2:2:NET) + FY*SFL*CNST;
+
+        ELM(1:2:NET,1:2:NET) = ELM(1:2:NET,1:2:NET) + RHO*(SFL)*SFL'*CNST;
+        ELM(2:2:NET,2:2:NET) = ELM(2:2:NET,2:2:NET) + RHO*(SFL)*SFL'*CNST;
+
+        ELK_VIS(1:2:NET,1:2:NET) = ELK_VIS(1:2:NET,1:2:NET) + (2*S11+S22);
+        ELK_VIS(1:2:NET,2:2:NET) = ELK_VIS(1:2:NET,2:2:NET) + S12';
+        ELK_VIS(2:2:NET,1:2:NET) = ELK_VIS(2:2:NET,1:2:NET) + S12;
+        ELK_VIS(2:2:NET,2:2:NET) = ELK_VIS(2:2:NET,2:2:NET) + (S11+2*S22);
+                
+        if(NONLIN>1)
+
+            TAN = TAN + DUX*CNST*(A1U*GDSFL(:,1)*SFL' + A1UX*(GDSFL(:,1))*GDSFL(:,1)' + A1UY*(GDSFL(:,1))*GDSFL(:,2)')...
+                + DUY*CNST*(A2U*GDSFL(:,2)*SFL' + A2UX*(GDSFL(:,2))*GDSFL(:,1)' + A2UY*(GDSFL(:,2))*GDSFL(:,2)');
+            
+        end
+    end
+
+    for NG = 1:NGPR
+        SFL   = SFL_REDU(:,NG);     % SHAPE FUNCTIONS
+        DSFL  = DSFL_REDU(:,:,NG);  % SHAPE FUNCTION DERIVATIVES (LOCAL)
+        JACOB = ELXY'*DSFL;          % JACOBIAN OF TRANSFORMATION
+        GDSFL = DSFL/JACOB;          % SHAPE FUNCTION DERIVATIVES (GLOBAL)
+        CNST  = det(JACOB)*GAUSWT_REDU(NG);
+        
+        S11_BAR = GAMMA * GDSFL(:,1)*GDSFL(:,1)'*CNST;
+        S12_BAR = GAMMA * GDSFL(:,1)*GDSFL(:,2)'*CNST;
+        S21_BAR = GAMMA * GDSFL(:,2)*GDSFL(:,1)'*CNST;
+        S22_BAR = GAMMA * GDSFL(:,2)*GDSFL(:,2)'*CNST;
+
+        ELK_PEN(1:2:NET,1:2:NET) = ELK_PEN(1:2:NET,1:2:NET) + S11_BAR;
+        ELK_PEN(1:2:NET,2:2:NET) = ELK_PEN(1:2:NET,2:2:NET) + S12_BAR;
+        ELK_PEN(2:2:NET,1:2:NET) = ELK_PEN(2:2:NET,1:2:NET) + S21_BAR;
+        ELK_PEN(2:2:NET,2:2:NET) = ELK_PEN(2:2:NET,2:2:NET) + S22_BAR;
+
+        
+    end
+    
+    % ELK0 = ELC0 + ELK_VIS + ELK_PEN;
+    % ELK = ELC + ELK_VIS + ELK_PEN;
+    % if ITEM>0
+    %     KRES = ELM + DATA.A1*ELK;
+    %     FRES = (ELM - DATA.A2*ELK0)*ELPU + (DATA.A1 + DATA.A2)*ELF;
+    % else
+    %     KRES = ELK;
+    %     FRES = ELF;
+    % end
+    % if NONLIN > 1
+    %     ELK_EFF = KRES + DATA.A1*TAN;           % tangent
+    %     ELF_EFF = FRES - KRES*ELCU;     % = -residual
+    % else
+    %     ELK_EFF = KRES;
+    %     ELF_EFF = FRES;
+    % end
+    % 
+    ELK0 = ELC0 + ELK_VIS + ELK_PEN;
+    ELK  = ELC  + ELK_VIS + ELK_PEN;
+    
+    if ITEM > 0
+        KRES = ELM + DATA.A1*ELK;
+        FRES = (ELM - DATA.A2*ELK0)*ELPU + (DATA.A1 + DATA.A2)*ELF;
+    
+        if NONLIN > 1
+            ELK_EFF = KRES + DATA.A1*TAN;
+            ELF_EFF = FRES - KRES*ELCU;
+        else
+            ELK_EFF = KRES;
+            ELF_EFF = FRES;
+        end
+    else
+        if NONLIN == 0
+            KRES = ELK_VIS + ELK_PEN;   % steady Stokes, Example 10.8.3
+        else
+            KRES = ELK;                 % steady Navier-Stokes, Example 10.8.4
+        end
+        FRES = ELF;
+    
+        if NONLIN > 1
+            ELK_EFF = KRES + TAN;
+            ELF_EFF = FRES - KRES*ELCU;
+        else
+            ELK_EFF = KRES;
+            ELF_EFF = FRES;
+        end
+    end
+end
+
+
+function [NOD, GLXY, NEM, NNM] = MESH2DR(NX,NY,NPE,DX,DY,X0,Y0)
+    if(NPE==4)
+        IEL = 1;
+    else
+        IEL = 2;
+    end
+    NEX1 = NX+1;
+    NEY1 = NY+1;
+    NXX  = IEL*NX;
+    NYY  = IEL*NY;
+    NXX1 = NXX + 1;
+    NYY1 = NYY + 1;
+    NEM  = NX*NY;
+    NNM  = NXX1*NYY1;
+    if(NPE==8)
+        NNM = NXX1*NYY1 - NX*NY;
+    end
+    GLXY = zeros(NNM,2);
+    K0 = 0;
+    if (NPE==9) 
+        K0=1;
+    end
+    NOD(1,1) = 1;
+    NOD(1,2) = IEL+1;
+    NOD(1,3) = NXX1+(IEL-1)*NEX1+IEL+1;
+    if(NPE==9) 
+        NOD(1,3)=4*NX+5;
+    end
+    NOD(1,4) = NOD(1,3) - IEL;
+    if(NPE>4)
+        NOD(1,5) = 2;
+        NOD(1,6) = NXX1 + (NPE-6);
+        NOD(1,7) = NOD(1,3) - 1;
+        NOD(1,8) = NXX1+1;
+        if(NPE==9)
+            NOD(1,9)=NXX1+2;
+        end
+    end
+    if(NY>1) 
+        M = 1;
+        for N = 2:NY
+            L = (N-1)*NX + 1;
+            for I = 1:NPE
+                NOD(L,I) = NOD(M,I)+NXX1+(IEL-1)*NEX1+K0*NX;
+            end
+            M=L;
+        end
+    end
+    if(NX>1)
+        for NI = 2:NX
+            for I = 1:NPE
+                K1 = IEL;
+                if(I==6 || I==8)
+                    K1=1+K0;
+                end
+                NOD(NI,I) = NOD(NI-1,I)+K1;
+            end
+            M = NI;
+            for NJ = 2:NY
+                L = (NJ-1)*NX+NI;
+                for J = 1:NPE
+                    NOD(L,J) = NOD(M,J)+NXX1+(IEL-1)*NEX1+K0*NX;
+                end
+                M = L;
+            end
+        end
+    end
+  
+    DX(NEX1) = 0.0;
+    DY(NEY1) = 0.0;
+    XC = X0;
+    YC=Y0;
+    if(NPE==8)
+        for NI = 1:NEY1 
+            I = (NXX1+NEX1)*(NI-1)+1;
+            J = 2*NI-1;
+            GLXY(I,1) = XC;
+            GLXY(I,2) = YC;
+            for NJ = 1:NX
+                DELX=0.5*DX(NJ);
+                I=I+1;
+                GLXY(I,1) = GLXY(I-1,1)+DELX;
+                GLXY(I,2) = YC;
+                I=I+1;
+                GLXY(I,1) = GLXY(I-1,1)+DELX;
+                GLXY(I,2) = YC;
+            end
+            if(NI<=NY)
+                I = I+1;
+                YC= YC+0.5*DY(NI);
+                GLXY(I,1) = XC;
+                GLXY(I,2) = YC;
+                for  II = 1:NX
+                    I = I+1;
+                    GLXY(I,1) = GLXY(I-1,1)+DX(II);
+                    GLXY(I,2) = YC;
+                end
+            end
+            YC = YC+0.5*DY(NI); 
+        end
+    else
+        YC=Y0;
+        for NI = 1:NEY1
+            XC = X0;
+            I = NXX1*IEL*(NI-1);
+            for NJ = 1:NEX1
+                I=I+1;
+                GLXY(I,1) = XC;
+                GLXY(I,2) = YC;
+                if(NJ<NEX1)
+                    if(IEL==2)
+                        I=I+1;
+                        XC = XC + 0.5*DX(NJ);
+                        GLXY(I,1) = XC;
+                        GLXY(I,2) = YC;
+                    end
+                end
+                XC = XC + DX(NJ)/IEL;
+            end
+            XC = X0;
+            if(IEL==2 && NI < NEY1)
+                YC = YC + 0.5*DY(NI);
+                for NJ = 1:NEX1
+                    I=I+1;
+                    GLXY(I,1) = XC;
+                    GLXY(I,2) = YC;
+                    if(NJ<NEX1)
+                        I=I+1;
+                        XC = XC + 0.5*DX(NJ);
+                        GLXY(I,1) = XC;
+                        GLXY(I,2) = YC;
+                    end
+                    XC = XC + 0.5*DX(NJ);
+                end
+            end
+            YC = YC + DY(NI)/IEL;
+        end
+    end
+end
+
+function [SFL, DSFL] = INTERPLN2D(NPE,XI,ETA)
+    
+    NP = [1,2,3,4,5,7,6,8,9];
+    XNODE = [-1.0D0, 1.0D0,1.0D0, -1.0D0, 0.0D0, 1.0D0, 0.0D0, -1.0D0,...
+             0.0D0; -1.0D0,-1.0D0, 1.0D0,1.0D0, -1.0D0, 0.0D0, 1.0D0,...
+             0.0D0,0.0D0]';
+    
+    SFL = zeros(NPE,1);
+    DSFL = zeros(2,NPE);
+    if(NPE==4)
+    % LINEAR LAGRANGE INTERPOLATION FUNCTIONS FOR FOUR-NODE ELEMENT
+        for I = 1:NPE
+            XP  = XNODE(I,1);
+            YP  = XNODE(I,2);
+            XI0 = 1.0+XI*XP;
+            ETA0=1.0+ETA*YP;
+            SFL(I)   = 0.25*FNC(XI0,ETA0);
+            DSFL(1,I)= 0.25*FNC(XP,ETA0);
+            DSFL(2,I)= 0.25*FNC(YP,XI0);
+         end
+    elseif(NPE==8)
+    % QUADRATIC LAGRANGE INTERPOLATION FUNCTIONS FOR EIGHT-NODE ELEMENT
+        for I = 1:NPE
+            NI   = NP(I);
+            XP   = XNODE(NI,1);
+            YP   = XNODE(NI,2);
+            XI0  = 1.0+XI*XP;
+            ETA0 = 1.0+ETA*YP;
+            XI1  = 1.0-XI*XI;
+            ETA1 = 1.0-ETA*ETA;
+            if(I<=4)
+                SFL(NI)    = 0.25*FNC(XI0,ETA0)*(XI*XP+ETA*YP-1.0);
+                DSFL(1,NI) = 0.25*FNC(ETA0,XP)*(2.0*XI*XP+ETA*YP);
+                DSFL(2,NI) = 0.25*FNC(XI0,YP)*(2.0*ETA*YP+XI*XP);
+            else
+                if(I<=6)
+                    SFL(NI)    = 0.5*FNC(XI1,ETA0);
+                    DSFL(1,NI) = -FNC(XI,ETA0);
+                    DSFL(2,NI) = 0.5*FNC(YP,XI1);
+                else
+                    SFL(NI)    = 0.5*FNC(ETA1,XI0);
+                    DSFL(1,NI) = 0.5*FNC(XP,ETA1);
+                    DSFL(2,NI) = -FNC(ETA,XI0);
+                end
+            end
+        end
+    elseif(NPE==9)
+    % QUADRATIC LAGRANGE INTERPOLATION FUNCTIONS FOR NINE-NODE ELEMENT
+        for I = 1:NPE
+            NI   = NP(I);
+            XP   = XNODE(NI,1);
+            YP   = XNODE(NI,2);
+            XI0  = 1.0+XI*XP;
+            ETA0 = 1.0+ETA*YP;
+            XI1  = 1.0-XI*XI;
+            ETA1 = 1.0-ETA*ETA;
+            XI2  = XP*XI;
+            ETA2 = YP*ETA;
+            if(I <=4)
+               SFL(NI)   = 0.25*FNC(XI0,ETA0)*XI2*ETA2;
+               DSFL(1,NI)= 0.25*XP*FNC(ETA2,ETA0)*(1.0+2.0*XI2);
+               DSFL(2,NI)= 0.25*YP*FNC(XI2,XI0)*(1.0+2.0*ETA2);
+            else
+               if(I<=6)
+                  SFL(NI)    = 0.5*FNC(XI1,ETA0)*ETA2;
+                  DSFL(1,NI) = -XI*FNC(ETA2,ETA0);
+                  DSFL(2,NI) = 0.5*FNC(XI1,YP)*(1.0+2.0*ETA2);
+               else
+                  if(I<=8)
+                     SFL(NI)    = 0.5*FNC(ETA1,XI0)*XI2;
+                     DSFL(2,NI) = -ETA*FNC(XI2,XI0);
+                     DSFL(1,NI) = 0.5*FNC(ETA1,XP)*(1.0+2.0*XI2);
+                  else
+                     SFL(NI)    = FNC(XI1,ETA1);
+                     DSFL(1,NI) = -2.0*XI*ETA1;
+                     DSFL(2,NI) = -2.0*ETA*XI1;
+                  end
+               end
+            end
+        end
+    end
+end
+
+function Y = FNC(A,B)
+    Y = A*B;
+end
+
+
+
+function [GAUSWT,SFL_ARRAY,DSFL_ARRAY] = PRECOMPUTE_SF2D(GFILE,NGP,NPE)
+    [GAUSPT,GAUSWT] = GAUSS(GFILE,NGP);
+    NGP2 = NGP*NGP;
+    GAUSWT = reshape(GAUSWT*GAUSWT',[NGP2,1]);
+    [IPET,IPXI] = meshgrid(GAUSPT,GAUSPT);
+    IPTS = [IPXI(:),IPET(:)];
+    SFL_ARRAY = zeros(NPE,NGP2);
+    DSFL_ARRAY = zeros(NPE,2,NGP2);
+    for I = 1:NGP2
+        XI = IPTS(I,1);
+        ETA = IPTS(I,2);
+        [SFL, DSFL] = INTERPLN2D(NPE,XI,ETA);
+        SFL_ARRAY(:,I) = SFL;
+        DSFL_ARRAY(:,:,I) = transpose(DSFL);
+    end
+end
+
+function [GAUSPT,GAUSWT] = GAUSS(GFILE,NGP)
+    FILEID  = fopen(GFILE);
+    TLINE   = fgetl(FILEID);
+    TLINES  = cell(50,1);
+    K = 1;
+    while ischar(TLINE)
+        TLINES{K,1} = TLINE; TLINE = fgetl(FILEID); K = K + 1;
+    end
+    fclose(FILEID);
+    LINE = TLINES{2};
+    CONT = textscan(LINE,'%f','Delimiter',',');
+    SF_S = CONT{1};
+    SF   = SF_S(NGP);
+    GAUSPT = zeros(NGP,1);
+    GAUSWT = zeros(NGP,1);
+    for NI = 1:NGP
+        LINE = TLINES{SF};
+        CONT = textscan(LINE,'%f %f %f');
+        GAUSWT(NI) = CONT{2};
+        GAUSPT(NI) = CONT{3};
+        SF = SF + 1;
+    end
+end
+
+function [PGXY, PVAL, DIVV, ELEM_ID, GP_ID] = POST_PRESSURE_PENALTY_2D( ...
+    NOD, GLXY, GLCU, NPE, NDF, SFL_REDU, DSFL_REDU, GAUSWT_REDU, GAMMA)
+
+    NEM  = size(NOD,1);
+    NGPR2 = size(GAUSWT_REDU,1);   % total reduced Gauss points per element
+    NET  = NPE * NDF;
+
+    NTOT = NEM * NGPR2;
+    PGXY   = zeros(NTOT,2);
+    PVAL   = zeros(NTOT,1);
+    DIVV   = zeros(NTOT,1);
+    ELEM_ID = zeros(NTOT,1);
+    GP_ID   = zeros(NTOT,1);
+
+    CNT = 0;
+
+    for E = 1:NEM
+        NODES = NOD(E,:);
+        ELXY  = GLXY(NODES,:);
+
+        % Global-to-local DOF map
+        INDXS = zeros(1,NET);
+        S = 1;
+        for ND = 1:NDF
+            INDXS(S:NDF:end) = NDF*NODES - (NDF - S)*ones(1,NPE);
+            S = S + 1;
+        end
+
+        ELU = GLCU(INDXS);
+
+        IX = 1:2:NET;
+        IY = 2:2:NET;
+
+        for NG = 1:NGPR2
+            SFL   = SFL_REDU(:,NG);
+            DSFL  = DSFL_REDU(:,:,NG);
+            JACOB = ELXY' * DSFL;
+            GDSFL = DSFL / JACOB;
+
+            XG = SFL' * ELXY(:,1);
+            YG = SFL' * ELXY(:,2);
+
+            DVXDX = GDSFL(:,1)' * ELU(IX);
+            DVYDY = GDSFL(:,2)' * ELU(IY);
+
+            DIV = DVXDX + DVYDY;
+            PRS = -GAMMA * DIV;
+
+            CNT = CNT + 1;
+            PGXY(CNT,:)   = [XG, YG];
+            DIVV(CNT)     = DIV;
+            PVAL(CNT)     = PRS;
+            ELEM_ID(CNT)  = E;
+            GP_ID(CNT)    = NG;
+        end
+    end
+end
