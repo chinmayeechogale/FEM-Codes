@@ -1,0 +1,64 @@
+# =========================================================================
+# F E M  1 D  S A M P L E  I N P U T  F I L E
+# =========================================================================
+# DOMAIN DATA
+# -------------------------------------------------------------------------
+X0: 0      # COORDINATE OF THE LEFT END OF THE DOMAIN
+L:  1      # LENGTH OF THE DOMAIN
+
+# PDE COEFFICIENTS
+# -------------------------------------------------------------------------
+# A(x,u,u_x) = AX0 + AX1*x + AU1*u + AU2*u^2 + AUX1*u_x + AUX2*u_x^2
+A: [-1,0,0,0,0,0]    # AX0, AX1, AU1, AU2, AUX1, AUX2
+
+# B(x,u,u_x) = BX0 + BX1*x + BU1*u + BU2*u^2 + BUX1*u_x + BUX2*u_x^2
+B: [0,0,-2,0,0,0]    # BX0, BX1, BU1, BU2, BUX1, BUX2
+
+# C(x,u,u_x) = CX0 + CX1*x + CU1*u + CU2*u^2 + CUX1*u_x + CUX2*u_x^2
+C: [0,0,0,0,0,0]     # CX0, CX1, CU1, CU2, CUX1, CUX2
+
+# F(x) = FX0 + FX1*x + FX2*x^2
+F: [0,0,0]           # FX0, FX1, FX2
+
+# MESH DATA
+# -------------------------------------------------------------------------
+P:   1    # ELEMENT ORDER
+NEM: 8    # NUMBER OF ELEMENTS IN THE MESH
+
+# QUADRATURE RULE
+# -------------------------------------------------------------------------
+NGP: 4    # NUMBER OF GAUSS POINTS
+
+# BOUNDARY CONDITIONS
+# -------------------------------------------------------------------------
+# COUNTS...
+NSPV: 0   # NUMBER OF DIRICHLET BOUNDARY CONDITIONS
+NSSV: 1   # NUMBER OF NEUMANN BOUNDARY CONDITIONS
+NSMB: 1   # NUMBER OF ROBIN BOUNDARY CONDITIONS
+
+# DIRICHLET BOUNDARY CONDITIONS...
+ISPV:
+  NODES: [1, 9]
+  DOFS:  [1, 1]
+VSPV:    [1, 0.5]
+
+# NEUMANN BOUNDARY CONDITIONS...
+ISSV:
+  NODES: [1]
+  DOFS:  [1]
+VSSV: [-1]
+
+# ROBIN BOUNDARY CONDITIONS...
+ISMB:
+  NODES: [9]
+  DOFS:  [1]
+UREF:  [0]
+BETA0: [0]
+BETAU: [1]
+
+# NONLINEAR ANALYSIS PARAMETERS
+# -------------------------------------------------------------------------
+NONLIN:  1      # SOLVER MODE (0 FOR LINEAR; 1 FOR PICARD; 2 FOR NEWTON)
+ITERMAX: 100   # MAXIMUM NUMBER OF ITERATIONS BEFORE TERMINATION
+EPSILON: 1e-3  # CONVERGENCE TOLERANCE
+GAMMA:   1     # RELAXATION PARAMETER
