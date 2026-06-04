@@ -1,0 +1,227 @@
+# =============================================================
+# INPUT FILE: Project 06 - Fluid-Structure Interaction (FSI) FEA
+# =============================================================
+
+# -------------------------------------------------------------
+# PROBLEM DESCRIPTION
+# -------------------------------------------------------------
+TITLE:     "FSI - Flexible Beam in Channel Flow (Turek-Hron Benchmark)"
+DIMENSION: 2                 # 2D problem
+ANALYSIS:  TRANSIENT         # STEADY or TRANSIENT
+FSI_TYPE:  PARTITIONED       # MONOLITHIC or PARTITIONED
+ALE:       true              # Use ALE formulation for fluid domain
+
+# -------------------------------------------------------------
+# FLUID MESH
+# -------------------------------------------------------------
+FLUID_MESH:
+  # Channel domain: 2.5m x 0.41m with a rigid cylinder + elastic beam
+  # Simplified mesh: channel nodes (rows from bottom to top)
+  ELEMENT_TYPE: Q4    # Fluid elements (Q4 stabilized or Q9/Q4 Taylor-Hood)
+
+  # Node coordinates [x, y] in meters (channel inlet to outlet)
+  NODES:
+    # Bottom wall (y=0)
+    1:  [0.0,  0.0]
+    2:  [0.5,  0.0]
+    3:  [1.0,  0.0]
+    4:  [1.5,  0.0]
+    5:  [2.0,  0.0]
+    6:  [2.5,  0.0]
+    # Mid-height row (y=0.205)
+    7:  [0.0,  0.205]
+    8:  [0.5,  0.205]
+    9:  [1.0,  0.205]
+    10: [1.5,  0.205]
+    11: [2.0,  0.205]
+    12: [2.5,  0.205]
+    # Top wall (y=0.41)
+    13: [0.0,  0.41]
+    14: [0.5,  0.41]
+    15: [1.0,  0.41]
+    16: [1.5,  0.41]
+    17: [2.0,  0.41]
+    18: [2.5,  0.41]
+
+  ELEMENTS:
+    1: [1,  2,  8,  7]
+    2: [2,  3,  9,  8]
+    3: [3,  4,  10, 9]
+    4: [4,  5,  11, 10]
+    5: [5,  6,  12, 11]
+    6: [7,  8,  14, 13]
+    7: [8,  9,  15, 14]
+    8: [9,  10, 16, 15]
+    9: [10, 11, 17, 16]
+    10: [11, 12, 18, 17]
+
+# -------------------------------------------------------------
+# STRUCTURE MESH (elastic beam attached to cylinder)
+# -------------------------------------------------------------
+STRUCTURE_MESH:
+  ELEMENT_TYPE: BEAM2   # BEAM2 (Euler-Bernoulli), BEAM3, Q4, T3
+
+  # Beam nodes along x-axis, attached at cylinder trailing edge (x=0.6)
+  # Beam: 0.35m long, 0.02m thick, clamped at x=0.6, free at x=0.95
+  NODES:
+    101: [0.60, 0.20]   # Fixed end (at cylinder)
+    102: [0.69, 0.20]
+    103: [0.77, 0.20]
+    104: [0.86, 0.20]
+    105: [0.95, 0.20]   # Free tip
+
+  ELEMENTS:
+    101: [101, 102]
+    102: [102, 103]
+    103: [103, 104]
+    104: [104, 105]
+
+# -------------------------------------------------------------
+# FSI INTERFACE DEFINITION
+# -------------------------------------------------------------
+FSI_INTERFACE:
+  # Fluid nodes on the FSI boundary (beam surface)
+  FLUID_NODES:     [9, 10]
+  # Corresponding structure nodes
+  STRUCTURE_NODES: [102, 103, 104]
+  # Interpolation method for non-matching meshes
+  INTERPOLATION:   RBF    # RBF (radial basis functions) or LINEAR
+
+# -------------------------------------------------------------
+# FLUID PROPERTIES
+# -------------------------------------------------------------
+FLUID:
+  RHO:        1000.0      # Density [kg/m^3] (water)
+  MU:         1.0         # Dynamic viscosity [Pa*s]
+  FLOW_MODEL: NAVIER_STOKES  # STOKES or NAVIER_STOKES
+  ELEMENT_FORMULATION: SUPG_PSPG  # TAYLOR_HOOD or SUPG_PSPG
+  # Re = rho * U_mean * D / mu = 1000 * 0.2 * 0.1 / 1.0 = 20 (laminar)
+
+# -------------------------------------------------------------
+# STRUCTURE PROPERTIES
+# -------------------------------------------------------------
+STRUCTURE:
+  E:          1.4e6     # Young's modulus [Pa] (soft elastic)
+  NU:         0.4       # Poisson's ratio
+  RHO:        1000.0    # Density [kg/m^3]
+  THICKNESS:  0.02      # Beam/plate thickness [m]
+  MODEL:      LINEAR    # LINEAR or NONLINEAR (geometric nonlinearity)
+  DAMPING:
+    TYPE:  RAYLEIGH
+    ALPHA: 0.0
+    BETA:  0.0
+
+# -------------------------------------------------------------
+# BOUNDARY CONDITIONS
+# -------------------------------------------------------------
+BOUNDARY_CONDITIONS:
+
+  # --- Fluid BCs ---
+  FLUID:
+    # Inlet (x=0): parabolic velocity profile
+    INLET:
+      NODES: [1, 7, 13]
+      TYPE:  PARABOLIC      # PARABOLIC or UNIFORM
+      U_MAX: 0.3            # Max centerline velocity [m/s]
+      V:     0.0
+
+    # Outlet (x=2.5): zero traction (natural BC)
+    OUTLET:
+      NODES: [6, 12, 18]
+      TYPE:  ZERO_TRACTION
+
+    # Top and bottom walls: no-slip
+    NO_SLIP:
+      NODES: [1, 2, 3, 4, 5, 6, 13, 14, 15, 16, 17, 18]
+
+    # Pressure reference
+    PRESSURE_PIN:
+      NODE:  18
+      VALUE: 0.0
+
+  # --- Structure BCs ---
+  STRUCTURE:
+    # Clamped end at cylinder attachment
+    FIXED:
+      NODES: [101]
+      DOF:   [ux, uy, theta]   # All DOFs fixed
+
+    # Free tip (no constraints)
+    FREE:
+      NODES: [105]
+
+  # Body forces
+  BODY_FORCE:
+    FLUID:     [0.0, 0.0]
+    STRUCTURE: [0.0, 0.0]
+
+# -------------------------------------------------------------
+# FSI SOLVER PARAMETERS
+# -------------------------------------------------------------
+SOLVER:
+  FSI_STRATEGY:   PARTITIONED    # MONOLITHIC or PARTITIONED
+
+  # Partitioned strategy settings
+  PARTITIONED:
+    MAX_SUBITER:    20           # Max FSI subiterations per time step
+    TOL:            1.0e-5       # Convergence tolerance (displacement norm)
+    ACCELERATION:   AITKEN       # NONE, AITKEN (dynamic relaxation), IQN-ILS
+    OMEGA_INIT:     0.5          # Initial Aitken relaxation factor
+
+  # Fluid sub-solver
+  FLUID_SOLVER:
+    MODE:           1            # 0=Stokes, 1=Picard, 2=Newton-Raphson
+    MAX_ITER:       50
+    TOL:            1.0e-6
+    LINEAR_SOLVER:  DIRECT
+
+  # Structure sub-solver
+  STRUCTURE_SOLVER:
+    MODE:           2            # 0=Linear, 1=Picard, 2=Newton-Raphson
+    MAX_ITER:       20
+    TOL:            1.0e-6
+
+# -------------------------------------------------------------
+# MESH MOTION (ALE mesh update)
+# -------------------------------------------------------------
+MESH_MOTION:
+  METHOD:     LAPLACIAN    # LAPLACIAN, RBF, or SPRING_ANALOGY
+  DIFFUSIVITY: UNIFORM     # UNIFORM or DISTANCE_BASED (stiffer near boundaries)
+  MAX_ITER:   50
+  TOL:        1.0e-8
+
+# -------------------------------------------------------------
+# TIME INTEGRATION
+# -------------------------------------------------------------
+TRANSIENT:
+  SCHEME:     GENERALIZED_ALPHA   # NEWMARK, BDF2, GENERALIZED_ALPHA
+  RHO_INF:    0.5                 # Spectral radius at infinite frequency (gen-alpha)
+  T_START:    0.0                 # Start time [s]
+  T_END:      10.0                # End time [s]
+  DT:         0.005               # Time step [s]
+  SAVE_FREQ:  20                  # Save every N steps
+  MONITOR:
+    FLUID_NODES:     [10]         # Track pressure/velocity at these nodes
+    STRUCTURE_NODES: [105]        # Track tip displacement
+
+# -------------------------------------------------------------
+# NUMERICAL INTEGRATION
+# -------------------------------------------------------------
+INTEGRATION:
+  FLUID_ORDER:     2    # 2x2 Gauss points for Q4 fluid elements
+  STRUCTURE_ORDER: 3    # 3-point Gauss for beam elements
+
+# -------------------------------------------------------------
+# OUTPUT OPTIONS
+# -------------------------------------------------------------
+OUTPUT:
+  FLUID_VELOCITY:       true
+  FLUID_PRESSURE:       true
+  FLUID_VORTICITY:      true
+  STRUCTURE_DISP:       true
+  STRUCTURE_STRESS:     true
+  INTERFACE_TRACTION:   true
+  DRAG_LIFT:            true    # Cd, Cl on rigid cylinder + beam
+  TIP_DISPLACEMENT:     true    # Beam tip x/y displacement vs. time
+  CONVERGENCE:          true
+  FORMAT:               vtk     # csv or vtk
