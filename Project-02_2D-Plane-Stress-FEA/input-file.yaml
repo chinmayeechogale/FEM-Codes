@@ -23,7 +23,7 @@ DY: [0.05, 0.05]
 
 # QUADRATURE RULE
 # -------------------------------------------------------------------------
-NGP: 3 # NUMBER OF GAUSS POINTS PER DIRECTION
+NGP: 2 # NUMBER OF GAUSS POINTS PER DIRECTION
 
 # BOUNDARY CONDITIONS
 # -------------------------------------------------------------------------
