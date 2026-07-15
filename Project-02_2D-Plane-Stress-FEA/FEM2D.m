@@ -141,16 +141,6 @@ while ITER<=ITERMAX
               
             end
         end
-        PV = [22,23,24];
-        for NP = 1:length(PV)
-            NODE_PV = PV(NP);
-            NB = (NODE_PV-1)*NDF + 1;
-            X = GLXY(NODE_PV,1);
-            T_VAL = 500 - 1000*X;
-            GLK(NB,:)  = 0;
-            GLK(NB,NB) = 1;
-            GLF(NB)    = T_VAL;
-        end
     end
     
     % MODIFY THE FORCE VECTOR TO INCLUDE SPECIFIED NONZERO 
@@ -181,15 +171,6 @@ while ITER<=ITERMAX
 
     % SOLVE SYSTEM OF SIMULTANEOUS LINEAR EQUATIONS. 
     SOLU = GLK\GLF;
-    
-
-    % *********************************************************************
-    % UPDATE THE SOLUTION AND CHECK CONVERGENCE CRITERIA
-    % *********************************************************************
-    %
-    % This is the block that you need to complete. 
-    %
-    % *********************************************************************
     GPU=GCU;
     if(NONLIN==0)
         GCU=SOLU;
@@ -264,14 +245,6 @@ function [ELK,ELF] = ELEMAT2D(DATA,SFL_ARRAY,DSFL_ARRAY,GAUSWT,NONLIN,...
             DUX = dot(ELU,GDSFL(:,1)); % 'du/dx'
             DUY = dot(ELU,GDSFL(:,2)); % 'du/dy'
         end
-        
-        % *****************************************************************
-        % COMPUTE THE PDE COEFFICIENTS
-        % *****************************************************************
-        % In this block, you are required to compute the PDE coefficients,
-        % which are functions of the spatial coordinate X, the unknown
-        % solution variable u, and its derivative du/dx.
-        % *****************************************************************
         A11 = A10 + A1X*X + A1Y*Y;
         A22 = A20 + A2X*X + A2Y*Y;
         F = FX0 + FX1*X + FY1*Y;
@@ -285,27 +258,10 @@ function [ELK,ELF] = ELEMAT2D(DATA,SFL_ARRAY,DSFL_ARRAY,GAUSWT,NONLIN,...
                     A22*(GDSFL(:,2))*GDSFL(:,2)'*CNST;
         ELF = ELF + F*SFL*CNST;
 
-        
-        % *************************************************************
-        % COMPUTE THE PART OF THE TANGENT COEFFICIENT MATRIX
-        % THAT ADDS TO ELK
-        % *************************************************************
         if(NONLIN>1)
 
             TAN = TAN + DUX*CNST*(A1U*GDSFL(:,1)*SFL' + A1UX*(GDSFL(:,1))*GDSFL(:,1)' + A1UY*(GDSFL(:,1))*GDSFL(:,2)')...
                 + DUY*CNST*(A2U*GDSFL(:,2)*SFL' + A1UX*(GDSFL(:,2))*GDSFL(:,1)' + A1UY*(GDSFL(:,2))*GDSFL(:,2)');
-            % for I=1:NPE
-            %     for J=1:NPE
-            %         S10 = GDSFL(1,I)*SFL(J)*CNST;
-            %         S20 = GDSFL(2,I)*SFL(J)*CNST;
-            %         S11 = GDSFL(1,I)*GDSFL(1,J)*CNST;
-            %         S12 = GDSFL(1,I)*GDSFL(2,J)*CNST;
-            %         S21 = GDSFL(2,I)*GDSFL(1,J)*CNST;
-            %         S22 = GDSFL(2,I)*GDSFL(2,J)*CNST;
-            %         TAN(I,J) = TAN(I,J) + DUX*(A1U*S10+A1UX*S11+A1UY*S12)...
-            %         + DUY*(A2U*S20+A2UX*S21+A2UY*S22);
-            %     end
-            % end
         end
     end
 
