@@ -1,109 +1,59 @@
-# =============================================================
-# INPUT FILE: Project 02 - 2D Plane Stress Non-Linear FEA
-# =============================================================
+# =========================================================================
+#           F E M   2 D   I N P U T   F I L E
+# =========================================================================
 
-# -------------------------------------------------------------
-# PROBLEM DESCRIPTION
-# -------------------------------------------------------------
-TITLE: "2D Plane Stress FEA - Cantilever Beam with Tip Load"
-DIMENSION: 2           # 2D problem
-ELEMENT_TYPE: Q4       # Q4 = 4-node quadrilateral; CST = 3-node triangle
+# DOMAIN DATA
+# -------------------------------------------------------------------------
+X0: 0 # X COORDINATE OF THE BOTTOM-LEFT CORNER OF THE DOMAIN
+Y0: 0 # Y COORDINATE OF THE BOTTOM-LEFT CORNER OF THE DOMAIN
 
-# -------------------------------------------------------------
-# MESH PARAMETERS
-# -------------------------------------------------------------
-MESH:
-  # Node coordinates: [x, y]
-  NODES:
-    1:  [0.0, 0.0]
-    2:  [0.5, 0.0]
-    3:  [1.0, 0.0]
-    4:  [1.5, 0.0]
-    5:  [2.0, 0.0]
-    6:  [0.0, 0.5]
-    7:  [0.5, 0.5]
-    8:  [1.0, 0.5]
-    9:  [1.5, 0.5]
-    10: [2.0, 0.5]
-    11: [0.0, 1.0]
-    12: [0.5, 1.0]
-    13: [1.0, 1.0]
-    14: [1.5, 1.0]
-    15: [2.0, 1.0]
+# PDE COEFFICIENTS
+# -------------------------------------------------------------------------
+A1: [0.2,0,0,0.0004,0,0]  # A10, A1X, A1Y, A1U, A1UX, A1UY
+A2: [0.2,0,0,0.0004,0,0]  # A20, A2X, A2Y, A2U, A2UX, A2UY
+F:  [0,0,0]                   # FX0, FX1, FY1
 
-  # Element connectivity: [n1, n2, n3, n4] (counter-clockwise)
-  ELEMENTS:
-    1:  [1,  2,  7,  6]
-    2:  [2,  3,  8,  7]
-    3:  [3,  4,  9,  8]
-    4:  [4,  5,  10, 9]
-    5:  [6,  7,  12, 11]
-    6:  [7,  8,  13, 12]
-    7:  [8,  9,  14, 13]
-    8:  [9,  10, 15, 14]
+# MESH DATA
+# -------------------------------------------------------------------------
+NPE: 4 # NODES PER ELEMENT (GIVEN TEMPLATE SUPPORTS NPE = 4, 8, AND 9 ONLY)
+# ELEMENT LENGTHS ALONG X ...
+DX: [0.1,0.1]
+# ELEMENT LENGTHS ALONG Y ...
+DY: [0.05, 0.05] 
 
-# -------------------------------------------------------------
-# MATERIAL PROPERTIES
-# -------------------------------------------------------------
-MATERIAL:
-  E:     210000.0   # Young's modulus [MPa]
-  NU:    0.3        # Poisson's ratio [-]
-  THICK: 0.01       # Thickness [m] (for plane stress)
-  RHO:   7850.0     # Density [kg/m^3] (for body force)
-  MODEL: LINEAR     # LINEAR or NONLINEAR
+# QUADRATURE RULE
+# -------------------------------------------------------------------------
+NGP: 3 # NUMBER OF GAUSS POINTS PER DIRECTION
 
-  # Nonlinear parameters (used if MODEL: NONLINEAR)
-  NONLINEAR:
-    HARDENING: ISOTROPIC   # ISOTROPIC or KINEMATIC
-    SIGMA_Y:   250.0       # Initial yield stress [MPa]
-    H:         1000.0      # Hardening modulus [MPa]
-
-# -------------------------------------------------------------
 # BOUNDARY CONDITIONS
-# -------------------------------------------------------------
-BOUNDARY_CONDITIONS:
+# -------------------------------------------------------------------------
+# COUNTS...
+NSPV: 28  # NUMBER OF DIRICHLET BOUNDARY CONDITIONS
+NSSV: 22  # NUMBER OF NEUMANN BOUNDARY CONDITIONS
+NSMB: 0  # NUMBER OF ROBIN BOUNDARY CONDITIONS
+# DIRICHLET BOUNDARY CONDITIONS...
+ISPV:
+ NODES: [1,6,11,16,21,5,10,15,20,25]
+ DOFS:  [1,1,1,1,1,1,1,1,1,1]
+VSPV:   [500,500,500,500,500,300,300,300,300,300]
+# NEUMANN BOUNDARY CONDITIONS...
+ISSV:
+ NODES: [2,3,4]
+ DOFS:  [1,1,1]
+VSSV:   [0,0,0]
+# ROBIN BOUNDARY CONDITIONS...
+ISMB:
+ NODES: [74,75,76,77,78,79,80]
+ DOFS:  [1,1,1,1,1,1,1]
+UREF:   [0]
+BETA0:  [500]
+BETAU:  [-1000]
 
-  # DIRICHLET: Fixed displacement BCs
-  # Format: node: [dof_x (0=free,1=fixed), dof_y, val_x, val_y]
-  DIRICHLET:
-    1:  [1, 1, 0.0, 0.0]   # Fixed in x and y
-    6:  [1, 1, 0.0, 0.0]   # Fixed in x and y
-    11: [1, 1, 0.0, 0.0]   # Fixed in x and y
+# NONLINEAR ANALYSIS PARAMETERS
+# -------------------------------------------------------------------------
+NONLIN:  2   # SOLVER MODE (0 FOR LINEAR; 1 FOR PICARD; 2 FOR NEWTON)
+ITERMAX: 25   # MAXIMUM NUMBER OF ITERATIONS BEFORE TERMINATION
+EPSILON: 1e-3 # CONVERGENCE TOLERANCE
+GAMMA:   1.0  # RELAXATION PARAMETER
 
-  # NEUMANN: Applied traction/force BCs
-  # Format: node: [Fx, Fy] in [N]
-  NEUMANN:
-    5:  [0.0, -500.0]    # Downward force at tip (node 5)
-    10: [0.0, -1000.0]   # Downward force at tip (node 10)
-    15: [0.0, -500.0]    # Downward force at tip (node 15)
 
-  # BODY FORCES: [bx, by] in [N/m^3]
-  BODY_FORCE:
-    BX: 0.0
-    BY: 0.0    # Set to -RHO*g for self-weight (e.g., -77015.0)
-
-# -------------------------------------------------------------
-# SOLVER PARAMETERS
-# -------------------------------------------------------------
-SOLVER:
-  MODE:     1       # 0 = Linear; 1 = Picard; 2 = Newton-Raphson
-  MAX_ITER: 50      # Maximum nonlinear iterations
-  TOL:      1.0e-6  # Convergence tolerance (relative residual norm)
-  GAMMA:    1.0     # Relaxation factor (1.0 = no relaxation)
-
-# -------------------------------------------------------------
-# NUMERICAL INTEGRATION
-# -------------------------------------------------------------
-INTEGRATION:
-  ORDER: 2    # Gauss quadrature order (2x2 = 4 points for Q4)
-
-# -------------------------------------------------------------
-# OUTPUT OPTIONS
-# -------------------------------------------------------------
-OUTPUT:
-  DISPLACEMENTS:  true
-  STRESSES:       true
-  STRAINS:        true
-  REACTIONS:      true
-  CONVERGENCE:    true
-  FORMAT:         csv    # csv or vtk
