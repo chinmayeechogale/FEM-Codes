@@ -306,13 +306,6 @@ function [ELK,ELF] = ELEMAT1D(DATA,SFL_ARRAY,DSFL_ARRAY,GAUSWT,NONLIN,...
     end
 end
 
-% =========================================================================
-% !!! 
-% YOU DO NOT NEED TO ALTER THE FUNCTIONS BELOW. THEY ARE COMPLETE
-% AND FUNCTIONAL AS THEY ARE 
-% !!!
-% =========================================================================
-
 function [GLX,NOD,NNM,NPE] = MESH1D(X0,L,NEM,P)
     NPE = P + 1; % NODES PER ELEMENT
     NNM = NEM*NPE - (NEM-1); % NUMBER OF NODES IN THE MESH
