@@ -54,13 +54,6 @@ where:
 - `[G]` = pressure-velocity coupling (divergence) matrix
 - `{f}` = external force / boundary traction vector
 
-**Stable element pairs used (satisfying LBB condition):**
-| Velocity Element | Pressure Element | Name |
-|---|---|---|
-| T6 (6-node quad. tri.) | T3 (3-node tri.) | Taylor-Hood T6/T3 |
-| Q9 (9-node quad.) | Q4 (4-node quad.) | Taylor-Hood Q9/Q4 |
-| Q4 + stabilization | Q4 | SUPG/PSPG stabilized |
-
 ---
 
 ## Features
